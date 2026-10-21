@@ -857,6 +857,9 @@ export default function PecadosPage() {
   const [orderSuccess, setOrderSuccess] = useState(false);
   // Producto sin stock pendiente de confirmar "Me interesa" (modal de aviso)
   const [interestConfirmProduct, setInterestConfirmProduct] = useState<Product | null>(null);
+  // Aviso temporal al agregar un producto con stock (el carrito no se abre)
+  const [cartToast, setCartToast] = useState<{ title: string; qty: number } | null>(null);
+  const cartToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load from PostgreSQL database on mount & purge any legacy localStorage
   useEffect(() => {
@@ -1008,7 +1011,22 @@ export default function PecadosPage() {
       }
       return [...prev, { product, quantity: Math.min(quantity, max), interest }];
     });
-    setIsCartOpen(true);
+
+    if (interest) {
+      // "Me interesa" ya pasó por el aviso de confirmación: se continúa al carrito
+      setIsCartOpen(true);
+    } else {
+      // Compra normal: no abrir el carrito, sólo avisar que se agregó
+      const current = cart.find((item) => item.product.id === product.id)?.quantity || 0;
+      showCartToast(product.title, Math.min(current + quantity, max));
+    }
+  };
+
+  // Aviso temporal "Agregado al carrito"
+  const showCartToast = (title: string, qty: number) => {
+    if (cartToastTimer.current) clearTimeout(cartToastTimer.current);
+    setCartToast({ title, qty });
+    cartToastTimer.current = setTimeout(() => setCartToast(null), 2500);
   };
 
   const updateCartQuantity = (productId: string, delta: number) => {
@@ -3698,7 +3716,10 @@ export default function PecadosPage() {
                                     </span>
                                     <button
                                       type="button"
-                                      onClick={() => updateCartQuantity(product.id, 1)}
+                                      onClick={() => {
+                                        updateCartQuantity(product.id, 1);
+                                        showCartToast(product.title, Math.min(qtyInCart + 1, cartItemMax(product, cartItem?.interest)));
+                                      }}
                                       disabled={qtyInCart >= cartItemMax(product, cartItem?.interest)}
                                       className={`p-1 rounded transition-colors cursor-pointer ${
                                         qtyInCart >= cartItemMax(product, cartItem?.interest)
@@ -3973,6 +3994,41 @@ export default function PecadosPage() {
               </motion.div>
             </div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* Aviso temporal "Agregado al carrito" (no abre el carrito) */}
+      <AnimatePresence>
+        {cartToast && !isCartOpen && (
+          <motion.div
+            key="cart-toast"
+            initial={{ opacity: 0, y: -12, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -12, scale: 0.97 }}
+            role="status"
+            aria-live="polite"
+            className="fixed z-50 top-20 left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-sm rounded-2xl bg-zinc-900/95 border border-red-800/70 shadow-2xl shadow-black/60 backdrop-blur-md p-3.5 flex items-center gap-3 text-zinc-100"
+          >
+            <div className="p-2 rounded-xl bg-emerald-950 text-emerald-400 border border-emerald-800/60 shrink-0">
+              <CheckCircle2 className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-white">Agregado al carrito</p>
+              <p className="text-[11px] text-zinc-400 line-clamp-1">
+                {cartToast.title} · {cartToast.qty} {cartToast.qty === 1 ? "unidad" : "unidades"}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setCartToast(null);
+                setIsCartOpen(true);
+              }}
+              className="px-2.5 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-[11px] font-bold whitespace-nowrap transition-colors cursor-pointer"
+            >
+              Ver carrito
+            </button>
+          </motion.div>
         )}
       </AnimatePresence>
 
