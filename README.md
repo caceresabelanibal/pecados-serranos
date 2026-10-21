@@ -127,3 +127,18 @@ http://TU_IP_O_DOMINIO:3000
   ```bash
   docker compose down
   ```
+
+## 🔐 Acceso administrador
+
+La contraseña de admin **no está en el código**: se configura en el `.env` del servidor como hash.
+
+```bash
+# 1. Generar el hash de la nueva contraseña (mínimo 12 caracteres)
+docker compose exec app node scripts/hash-password.js 'NUEVA_CONTRASEÑA'
+# 2. Reemplazar ADMIN_PASSWORD_HASH en .env con el valor obtenido
+# 3. Aplicar (cierra todas las sesiones abiertas)
+docker compose up -d
+```
+
+`SESSION_SECRET` debe ser un valor aleatorio de al menos 32 caracteres (`openssl rand -hex 32`).
+Cuando haya un reverse proxy con HTTPS delante, poner `TRUST_PROXY=true` y `COOKIE_SECURE=true`.

@@ -11,13 +11,14 @@ RUN apk add --no-cache libc6-compat openssl
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
+ENV NEXT_TELEMETRY_DISABLED=1
 
 # Copiar archivos de dependencias
 COPY package*.json ./
 COPY prisma ./prisma/
 
 # Instalar dependencias
-RUN npm ci
+RUN npm ci --include=dev
 
 # Copiar todo el código fuente del proyecto
 COPY . .
@@ -29,7 +30,10 @@ RUN npx prisma generate
 RUN npm run build
 
 # Dar permisos de ejecución al script de arranque
-RUN chmod +x ./scripts/entrypoint.sh
+RUN chmod +x ./scripts/entrypoint.sh && chown -R node:node /app/.next
+
+# Ejecutar como usuario sin privilegios (no root)
+USER node
 
 # Exponer el puerto de la aplicación
 EXPOSE 3000

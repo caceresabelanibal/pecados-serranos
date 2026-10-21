@@ -17,10 +17,6 @@ async function main() {
 
     if (count === 0) {
       console.log("[Seed] Sembrando los 30 productos oficiales desde catálogo inicial...");
-      // Cargar productos
-      const { INITIAL_PRODUCTS, INITIAL_RESELLERS } = require("../app/products.js") || {};
-      
-      // Si no se puede requerir directamente por typescript, sembrar desde api route o script
       console.log("[Seed] Tablas listas. La API sembrará los 30 productos en la primera solicitud si está vacía.");
     }
 

@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
       POSTGRES_DB: ${POSTGRES_DB:-pecados_serranos}
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - "${DB_PORT:-127.0.0.1:5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -32,6 +32,13 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres123}@db:5432/${POSTGRES_DB:-pecados_serranos}?schema=public
       NODE_ENV: production
       PORT: 3000
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:?Falta ADMIN_PASSWORD_HASH en .env (ver README)}
+      SESSION_SECRET: ${SESSION_SECRET:?Falta SESSION_SECRET en .env (ver README)}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "${APP_PORT:-3000}:3000"
 

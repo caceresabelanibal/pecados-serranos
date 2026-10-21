@@ -1,15 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import {
-  INITIAL_PRODUCTS,
-  INITIAL_RESELLERS,
-  INITIAL_PURCHASES,
-  Product,
-  Sale,
-  Reseller,
-  Consignment,
-  PurchaseRecord,
-} from "@/app/products";
+import type { Product, Sale, Reseller, Consignment, PurchaseRecord } from "@/app/products";
+import { INITIAL_PRODUCTS, INITIAL_RESELLERS, INITIAL_PURCHASES } from "@/lib/initial-data";
+import { isAdminRequest, isSameOriginJson } from "@/lib/auth";
 
 // Cache de respaldo en memoria si la base de datos está desconectada
 let memoryProducts: Product[] = [...INITIAL_PRODUCTS];
@@ -164,9 +157,61 @@ async function ensureTablesExist() {
   }
 }
 
-// GET /api/pecados/productos
+const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate" };
+
+// Campos de producto visibles para el público (sin costos, márgenes ni notas internas)
+function toPublicProduct(p: Product) {
+  return {
+    id: p.id,
+    sku: p.sku,
+    tipo: p.tipo,
+    category: p.category,
+    title: p.title,
+    description: p.description,
+    precioEfectivo: p.precioEfectivo ?? p.price,
+    price: p.price ?? p.precioEfectivo,
+    precioTarjeta: p.precioTarjeta,
+    stock: p.stock,
+    image: p.image,
+  };
+}
+
+// GET /api/productos
+// Público: sólo catálogo con precios de venta. Administrador (cookie de sesión): estado comercial completo.
+export async function GET(request: Request) {
+  if (isAdminRequest(request)) {
+    // Catálogo inicial (para "restablecer catálogo" y restaurar respaldos) — sólo admin
+    if (new URL(request.url).searchParams.get("initial") === "1") {
+      return NextResponse.json(
+        { products: INITIAL_PRODUCTS, resellers: INITIAL_RESELLERS },
+        { headers: NO_STORE }
+      );
+    }
+    return getFullState();
+  }
+
+  const full = await getFullState();
+
+  let data: any = {};
+  try {
+    data = await full.json();
+  } catch {}
+  return NextResponse.json(
+    {
+      products: Array.isArray(data.products) ? data.products.map(toPublicProduct) : [],
+      sales: [],
+      resellers: [],
+      consignments: [],
+      purchases: [],
+      whatsappNumber: data.whatsappNumber,
+      updatedAt: data.updatedAt,
+    },
+    { headers: NO_STORE }
+  );
+}
+
 // Lee de la base de datos PostgreSQL real (Prisma) con sincronización bidireccional
-export async function GET() {
+async function getFullState() {
   const hasPostgres = isPostgresConfigured();
 
   if (hasPostgres) {
@@ -454,7 +499,7 @@ export async function GET() {
           hasCloudStorage: true,
           dbStatus: "error_connecting",
           dbEngine: "PostgreSQL (Error conexión)",
-          dbDetails: `DATABASE_URL está configurada pero falló la conexión con PostgreSQL: ${dbError?.message || dbError}`,
+          dbDetails: "DATABASE_URL está configurada pero falló la conexión con PostgreSQL. Revisá los logs del servidor.",
         },
         {
           headers: {
@@ -496,16 +541,16 @@ export async function GET() {
 // Guarda y sincroniza productos, ventas, revendedores y consignaciones en PostgreSQL
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const { products, sales, resellers, consignments, purchases, whatsappNumber, adminPass } = body;
-
-    // Validación de seguridad para que sólo el administrador pueda publicar
-    if (adminPass !== "multipaginas2026") {
-      return NextResponse.json(
-        { error: "No autorizado. Clave de administración incorrecta." },
-        { status: 401 }
-      );
+    // Validación de seguridad: sólo el administrador con sesión válida puede publicar
+    if (!isAdminRequest(request)) {
+      return NextResponse.json({ error: "No autorizado." }, { status: 401 });
     }
+    if (!isSameOriginJson(request)) {
+      return NextResponse.json({ error: "Solicitud inválida." }, { status: 400 });
+    }
+
+    const body = await request.json();
+    const { products, sales, resellers, consignments, purchases, whatsappNumber } = body;
 
     const hasPostgres = isPostgresConfigured();
     let postgresSaved = false;
@@ -682,7 +727,7 @@ export async function POST(request: Request) {
         }
 
         // 6. Guardar WhatsApp en PostgreSQL
-        if (whatsappNumber && typeof whatsappNumber === "string") {
+        if (whatsappNumber && typeof whatsappNumber === "string" && /^[0-9]{8,15}$/.test(whatsappNumber)) {
           await prisma.$executeRawUnsafe(
             `INSERT INTO "PecadoSetting" ("key", "value", "updatedAt")
              VALUES ('whatsappNumber', $1, CURRENT_TIMESTAMP)
@@ -704,7 +749,7 @@ export async function POST(request: Request) {
     if (resellers && Array.isArray(resellers)) memoryResellers = resellers;
     if (consignments && Array.isArray(consignments)) memoryConsignments = consignments;
     if (purchases && Array.isArray(purchases)) memoryPurchases = purchases;
-    if (whatsappNumber && typeof whatsappNumber === "string") memoryWhatsappNumber = whatsappNumber;
+    if (whatsappNumber && typeof whatsappNumber === "string" && /^[0-9]{8,15}$/.test(whatsappNumber)) memoryWhatsappNumber = whatsappNumber;
     serverUpdatedAt = new Date().toISOString();
 
     return NextResponse.json({
@@ -733,4 +778,39 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
+}
+
+// DELETE /api/productos  { id }
+// Baja lógica del producto (active=false): desaparece del catálogo y del panel,
+// pero se conserva para el historial de ventas. Si se vuelve a cargar el mismo SKU, se reactiva.
+export async function DELETE(request: Request) {
+  if (!isAdminRequest(request)) {
+    return NextResponse.json({ error: "No autorizado." }, { status: 401 });
+  }
+  if (!isSameOriginJson(request)) {
+    return NextResponse.json({ error: "Solicitud inválida." }, { status: 400 });
+  }
+
+  let id: unknown;
+  try {
+    ({ id } = await request.json());
+  } catch {}
+  if (typeof id !== "string" || !id || id.length > 64) {
+    return NextResponse.json({ error: "Producto inválido." }, { status: 400 });
+  }
+
+  if (isPostgresConfigured()) {
+    try {
+      const res = await prisma.pecadoProduct.updateMany({ where: { id, active: true }, data: { active: false } });
+      if (res.count === 0) {
+        return NextResponse.json({ error: "Producto no encontrado." }, { status: 404 });
+      }
+    } catch (err) {
+      console.error("[Prisma PostgreSQL] Error eliminando producto:", err);
+      return NextResponse.json({ error: "No se pudo eliminar el producto." }, { status: 500 });
+    }
+  }
+
+  memoryProducts = memoryProducts.filter((p) => p.id !== id);
+  return NextResponse.json({ success: true, id });
 }

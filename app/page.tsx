@@ -59,9 +59,6 @@ import {
   Consignment,
   PurchaseRecord,
   PurchaseItemDetail,
-  INITIAL_PRODUCTS,
-  INITIAL_RESELLERS,
-  INITIAL_PURCHASES,
   PRESET_IMAGES,
   IVA_RATE,
   TARJETA_MARKUP,
@@ -82,7 +79,7 @@ import {
 
 export default function PecadosPage() {
   // Store products & cart
-  const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
+  const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -90,7 +87,7 @@ export default function PecadosPage() {
 
   // Commercial state (Sales, Resellers, Consignments)
   const [sales, setSales] = useState<Sale[]>([]);
-  const [resellers, setResellers] = useState<Reseller[]>(INITIAL_RESELLERS);
+  const [resellers, setResellers] = useState<Reseller[]>([]);
   const [consignments, setConsignments] = useState<Consignment[]>([]);
 
   // Admin state & navigation
@@ -102,7 +99,7 @@ export default function PecadosPage() {
   const [loginError, setLoginError] = useState("");
 
   // Purchase History & Supplier Purchases state
-  const [purchases, setPurchases] = useState<PurchaseRecord[]>(INITIAL_PURCHASES);
+  const [purchases, setPurchases] = useState<PurchaseRecord[]>([]);
   const [selectedPurchaseForDetail, setSelectedPurchaseForDetail] = useState<PurchaseRecord | null>(null);
   const [purchaseSearchQuery, setPurchaseSearchQuery] = useState("");
   const [purchaseSourceFilter, setPurchaseSourceFilter] = useState<"all" | "excel_import" | "initial_seed">("all");
@@ -824,9 +821,15 @@ export default function PecadosPage() {
           consignments: newConsignments,
           purchases: newPurchases,
           whatsappNumber: newWhatsapp ?? whatsappNumber,
-          adminPass: "multipaginas2026",
         }),
       });
+
+      if (res.status === 401) {
+        setIsAdmin(false);
+        alert("Tu sesión de administrador expiró. Ingresá de nuevo; los últimos cambios no se guardaron.");
+        fetchServerData();
+        return;
+      }
 
       if (res.ok) {
         const data = await res.json();
@@ -873,50 +876,68 @@ export default function PecadosPage() {
           "multipaginas_pecados_admin",
         ];
         legacyKeys.forEach((key) => localStorage.removeItem(key));
-
-        // Sesión admin en memoria de pestaña (sessionStorage)
-        if (sessionStorage.getItem("multipaginas_pecados_admin") === "true") {
-          setIsAdmin(true);
-          setIsCartOpen(false);
-          setCart([]);
-        }
+        sessionStorage.removeItem("multipaginas_pecados_admin");
       }
     } catch (e) {
       console.warn("Aviso al purgar localStorage:", e);
     }
 
+    // La sesión de administrador la valida el servidor (cookie HttpOnly)
+    fetch("/api/auth/me", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.isAdmin) {
+          setIsAdmin(true);
+          setIsCartOpen(false);
+          setCart([]);
+        }
+      })
+      .catch(() => {});
+
     fetchServerData();
   }, []);
 
   // Login handler
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (loginUser.trim() === "admin" && loginPass.trim() === "multipaginas2026") {
+    setLoginError("");
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user: loginUser.trim(), password: loginPass }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setLoginError(data?.error || "Usuario o contraseña incorrectos.");
+        return;
+      }
       setIsAdmin(true);
       setIsCartOpen(false);
       setCart([]);
-      try {
-        if (typeof window !== "undefined") {
-          sessionStorage.setItem("multipaginas_pecados_admin", "true");
-        }
-      } catch {}
       setShowLoginModal(false);
       setLoginUser("");
       setLoginPass("");
-      setLoginError("");
-    } else {
-      setLoginError("Usuario o contraseña incorrectos.");
+      // Cargar el estado comercial completo (costos, ventas, revendedores) ya autenticado
+      await fetchServerData();
+    } catch {
+      setLoginError("No se pudo conectar con el servidor.");
     }
   };
 
   // Logout handler
   const handleLogout = () => {
     setIsAdmin(false);
-    try {
-      if (typeof window !== "undefined") {
-        sessionStorage.removeItem("multipaginas_pecados_admin");
-      }
-    } catch {}
+    fetch("/api/auth/logout", { method: "POST" })
+      .catch(() => {})
+      .finally(() => {
+        // Descartar de memoria los datos internos y recargar sólo el catálogo público
+        setSales([]);
+        setResellers([]);
+        setConsignments([]);
+        setPurchases([]);
+        fetchServerData();
+      });
   };
 
   // Save WhatsApp number directly to PostgreSQL
@@ -936,7 +957,6 @@ export default function PecadosPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           whatsappNumber: clean,
-          adminPass: "multipaginas2026",
         }),
       });
     } catch (err) {
@@ -1043,21 +1063,20 @@ export default function PecadosPage() {
       return p;
     });
 
-    // Record sale in commercial database
-    const newSale: Sale = {
-      id: "sale-" + Date.now(),
-      date: new Date().toISOString(),
-      buyerName: buyerName.trim() || "Cliente Web WhatsApp",
-      channel: "web_whatsapp",
-      items: saleItems,
-      totalAmount: cartTotal,
-      paymentMethod: cartPaymentMethod === "tarjeta" ? "mercadopago" : "efectivo",
-      status: "completed",
-      notes: buyerAddress.trim() ? `Dirección: ${buyerAddress.trim()}` : "",
-    };
-
-    const updatedSales = [newSale, ...sales];
-    persistAllData(updatedProducts, updatedSales, resellers, consignments);
+    // Registrar el pedido en el servidor (precios y stock se validan del lado del servidor)
+    setProducts(updatedProducts);
+    fetch("/api/pedidos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: saleItems.map((i) => ({ sku: i.productSku, quantity: i.quantity })),
+        paymentMethod: cartPaymentMethod,
+        buyerName: buyerName.trim(),
+        buyerAddress: buyerAddress.trim(),
+      }),
+    })
+      .catch((err) => console.error("Error registrando el pedido:", err))
+      .finally(() => fetchServerData());
 
     // Clear cart & notify
     setCart([]);
@@ -1140,17 +1159,37 @@ export default function PecadosPage() {
     setShowProductModal(true);
   };
 
-  const handleDeleteProduct = (id: string) => {
-    if (window.confirm("¿Seguro que deseás eliminar este producto del catálogo?")) {
-      const updated = products.filter((p) => p.id !== id);
-      persistAllData(updated, sales, resellers, consignments);
+  const handleDeleteProduct = async (id: string) => {
+    if (!window.confirm("¿Seguro que deseás eliminar este producto del catálogo?")) return;
+    try {
+      const res = await fetch("/api/pecados/productos", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (res.status === 401) {
+        setIsAdmin(false);
+        alert("Tu sesión de administrador expiró. Ingresá de nuevo para eliminar el producto.");
+        return;
+      }
+      if (!res.ok && res.status !== 404) {
+        const data = await res.json().catch(() => null);
+        alert(data?.error || "No se pudo eliminar el producto.");
+        return;
+      }
+      setProducts((prev) => prev.filter((p) => p.id !== id));
       removeFromCart(id);
+    } catch {
+      alert("No se pudo conectar con el servidor para eliminar el producto.");
     }
   };
 
   const handleResetCatalog = () => {
     if (window.confirm("¿Seguro que querés restablecer el producto de prueba inicial?")) {
-      persistAllData(INITIAL_PRODUCTS, sales, resellers, consignments);
+      fetch("/api/pecados/productos?initial=1", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+        .then((d) => persistAllData(d.products, sales, resellers, consignments))
+        .catch(() => alert("No se pudo obtener el catálogo inicial. Volvé a ingresar como administrador."));
     }
   };
 
@@ -1663,7 +1702,7 @@ export default function PecadosPage() {
             persistAllData(
               json.products,
               json.sales || [],
-              json.resellers || INITIAL_RESELLERS,
+              json.resellers || resellers,
               json.consignments || [],
               json.purchases || [],
               json.whatsappNumber || undefined
@@ -3332,7 +3371,7 @@ export default function PecadosPage() {
               </div>
 
               <p className="text-zinc-300 text-sm sm:text-base leading-relaxed max-w-2xl mx-auto font-normal">
-                Descubrí nuestras tentaciones artesanales con stock en tiempo real. Seleccioná lo que desees, armá tu carrito y enviá tu pedido directamente por WhatsApp.
+                Descubrí nuestras tentaciones hechas productos íntimos, la mayor reserva y privacidad al momento de la venta, sentite libre de comprar y disfrutar!
               </p>
 
               {isAdmin && (
@@ -5736,8 +5775,8 @@ export default function PecadosPage() {
             <span className="italic text-red-400">Pueblo chico, infierno grande</span>
           </div>
           <div className="flex items-center gap-4 text-zinc-400">
-            <Link href="/" className="hover:text-white transition-colors">
-              Multipáginas Home
+            <Link href="https://www.multipaginas.com.ar/" className="hover:text-white transition-colors">
+              Multipáginas | Soluciones web en punilla!
             </Link>
             <a
               href={`https://wa.me/${whatsappNumber}`}

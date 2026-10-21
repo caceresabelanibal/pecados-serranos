@@ -1,4 +1,4 @@
-import { PurchaseRecord } from '@/app/products';
+import type { PurchaseRecord } from '@/app/products';
 
 export const INITIAL_PURCHASES: PurchaseRecord[] = [
 {

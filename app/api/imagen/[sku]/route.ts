@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import fs from "fs";
 import path from "path";
+import { isAdminRequest, isSameOriginJson } from "@/lib/auth";
+
+const ALLOWED_IMAGE = /^data:(image\/(?:png|jpeg|jpg|webp|gif));base64,([A-Za-z0-9+/=]+)$/;
+const MAX_IMAGE_CHARS = 8 * 1024 * 1024; // ~6 MB de imagen
+const SKU_RE = /^[A-Z0-9._-]{1,40}$/;
 
 // GET /api/pecados/imagen/[sku]
 // Sirve la imagen del producto directamente desde PostgreSQL (Base64, URL o archivo local) usando su SKU
@@ -29,7 +34,7 @@ export async function GET(
       if (product?.image) {
         // A) Si la imagen está guardada como Data URI Base64 directamente en PostgreSQL
         if (product.image.startsWith("data:image/")) {
-          const matches = product.image.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
+          const matches = product.image.match(ALLOWED_IMAGE);
           if (matches) {
             const mimeType = matches[1];
             const buffer = Buffer.from(matches[2], "base64");
@@ -37,13 +42,15 @@ export async function GET(
               headers: {
                 "Content-Type": mimeType,
                 "Cache-Control": "public, max-age=86400, stale-while-revalidate=43200",
+                "X-Content-Type-Options": "nosniff",
+                "Content-Security-Policy": "default-src 'none'; sandbox",
               },
             });
           }
         }
 
         // B) Si la imagen está guardada como URL remota
-        if (product.image.startsWith("http://") || product.image.startsWith("https://")) {
+        if (product.image.startsWith("https://")) {
           return NextResponse.redirect(product.image, { status: 307 });
         }
       }
@@ -54,7 +61,7 @@ export async function GET(
 
   // 2. Respaldo: Archivos locales en public/pecados/products/
   const possibleExtensions = [".jpg", ".png", ".jpeg", ".webp"];
-  for (const ext of possibleExtensions) {
+  for (const ext of SKU_RE.test(cleanSku) ? possibleExtensions : []) {
     const filePath = path.join(process.cwd(), "public", "pecados", "products", `${cleanSku}${ext}`);
     if (fs.existsSync(filePath)) {
       const fileBuffer = fs.readFileSync(filePath);
@@ -90,17 +97,27 @@ export async function POST(
   { params }: { params: Promise<{ sku: string }> }
 ) {
   try {
+    if (!isAdminRequest(request)) {
+      return NextResponse.json({ error: "No autorizado." }, { status: 401 });
+    }
+    if (!isSameOriginJson(request)) {
+      return NextResponse.json({ error: "Solicitud inválida." }, { status: 400 });
+    }
+
     const { sku } = await params;
     const cleanSku = decodeURIComponent(sku).trim().toUpperCase();
     const body = await request.json();
-    const { image, adminPass } = body;
+    const { image } = body;
 
-    if (adminPass !== "multipaginas2026") {
-      return NextResponse.json({ error: "No autorizado." }, { status: 401 });
-    }
-
-    if (!image) {
-      return NextResponse.json({ error: "Debe proporcionar los datos de la imagen." }, { status: 400 });
+    const validImage =
+      typeof image === "string" &&
+      image.length <= MAX_IMAGE_CHARS &&
+      (ALLOWED_IMAGE.test(image) || /^https:\/\/[^\s"'<>]+$/.test(image));
+    if (!validImage) {
+      return NextResponse.json(
+        { error: "Imagen inválida: sólo PNG, JPEG, WEBP o GIF (máx. 6 MB) o una URL https." },
+        { status: 400 }
+      );
     }
 
     const hasPostgres = Boolean(
