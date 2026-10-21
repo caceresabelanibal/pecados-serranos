@@ -855,6 +855,8 @@ export default function PecadosPage() {
   const [buyerName, setBuyerName] = useState("");
   const [buyerAddress, setBuyerAddress] = useState("");
   const [orderSuccess, setOrderSuccess] = useState(false);
+  // Producto sin stock pendiente de confirmar "Me interesa" (modal de aviso)
+  const [interestConfirmProduct, setInterestConfirmProduct] = useState<Product | null>(null);
 
   // Load from PostgreSQL database on mount & purge any legacy localStorage
   useEffect(() => {
@@ -3670,7 +3672,7 @@ export default function PecadosPage() {
                                 {qtyInCart === 0 ? (
                                   <button
                                     type="button"
-                                    onClick={() => addToCart(product, 1)}
+                                    onClick={() => (inStock ? addToCart(product, 1) : setInterestConfirmProduct(product))}
                                     title={inStock ? "Agregar al carrito" : "Sin stock: avisanos que te interesa y te contactamos cuando vuelva"}
                                     className={`w-full sm:w-auto px-2.5 py-1 sm:px-3 sm:py-1 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer hover:scale-105 active:scale-95 ${
                                       inStock
@@ -3970,6 +3972,75 @@ export default function PecadosPage() {
                 )}
               </motion.div>
             </div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Aviso "Me interesa" (producto sin stock): confirmar antes de agregar al carrito */}
+      <AnimatePresence>
+        {interestConfirmProduct && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setInterestConfirmProduct(null)}
+              className="absolute inset-0 bg-black/85 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="interest-confirm-title"
+              className="relative w-full max-w-sm rounded-2xl bg-zinc-900 border border-amber-800/60 p-6 shadow-2xl text-zinc-100 z-10"
+            >
+              <div className="flex items-center gap-2 mb-3">
+                <div className="p-2 rounded-xl bg-amber-950 text-amber-300 border border-amber-800/60">
+                  <HandHeart className="w-4 h-4" />
+                </div>
+                <h3 id="interest-confirm-title" className="text-base font-bold text-amber-300">
+                  Me interesa (sin stock)
+                </h3>
+              </div>
+
+              <p className="text-sm text-zinc-200 leading-relaxed">
+                No es una compra ni suma al total: le avisamos a la tienda que te interesan y te contactan cuando vuelvan a entrar.
+              </p>
+
+              <div className="mt-4 p-2.5 rounded-xl bg-zinc-950 border border-zinc-800 flex items-center gap-2">
+                {interestConfirmProduct.sku && (
+                  <span className="font-mono text-[10px] text-red-400 bg-red-950/60 px-1 rounded shrink-0">
+                    #{interestConfirmProduct.sku}
+                  </span>
+                )}
+                <span className="text-xs font-semibold text-white line-clamp-2">{interestConfirmProduct.title}</span>
+              </div>
+
+              <p className="mt-4 text-xs text-zinc-400">¿Querés continuar y agregarlo al carrito?</p>
+
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setInterestConfirmProduct(null)}
+                  className="py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold border border-zinc-700 transition-colors cursor-pointer"
+                >
+                  No, volver
+                </button>
+                <button
+                  type="button"
+                  autoFocus
+                  onClick={() => {
+                    addToCart(interestConfirmProduct, 1);
+                    setInterestConfirmProduct(null);
+                  }}
+                  className="py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-black text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Sí, continuar al carrito
+                </button>
+              </div>
+            </motion.div>
           </div>
         )}
       </AnimatePresence>
