@@ -121,3 +121,34 @@ model PecadoSetting {
   value     String
   updatedAt DateTime @default(now())
 }
+
+// Interés de clientes en productos sin stock (no descuenta stock, no es una venta)
+model PecadoInterest {
+  id           String   @id @default(cuid())
+  productId    String?
+  productSku   String
+  productTitle String
+  quantity     Int      @default(1)
+  buyerName    String   @default("")
+  notes        String   @default("")
+  // pending = nuevo | ordered = incluido en pedido a proveedor | closed = resuelto/descartado
+  status       String   @default("pending")
+  createdAt    DateTime @default(now())
+
+  @@index([productSku])
+  @@index([status])
+}
+
+// Pedido a proveedor en preparación (lo que se va a comprar)
+model PecadoPurchasePlanItem {
+  id           String   @id @default(cuid())
+  productSku   String   @unique
+  productTitle String
+  tipo         String   @default("")
+  quantity     Int      @default(1)
+  costoSinIva  Float    @default(0)
+  image        String   @default("")
+  fromInterest Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now()) @updatedAt
+}

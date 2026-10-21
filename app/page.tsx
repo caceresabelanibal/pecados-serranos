@@ -47,7 +47,9 @@ import {
   Filter,
   Printer,
   FileText,
+  HandHeart,
 } from "lucide-react";
+import InterestsTab from "@/app/components/InterestsTab";
 import * as XLSX from "xlsx";
 import { VSHOP_CATALOG_DICT } from "@/lib/vshop-catalog-dict";
 import {
@@ -92,7 +94,8 @@ export default function PecadosPage() {
 
   // Admin state & navigation
   const [isAdmin, setIsAdmin] = useState(false);
-  const [adminTab, setAdminTab] = useState<"catalog" | "stock" | "purchases" | "sales" | "resellers" | "settings">("catalog");
+  const [adminTab, setAdminTab] = useState<"catalog" | "stock" | "interests" | "purchases" | "sales" | "resellers" | "settings">("catalog");
+  const [pendingInterestCount, setPendingInterestCount] = useState(0);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [loginUser, setLoginUser] = useState("");
   const [loginPass, setLoginPass] = useState("");
@@ -940,6 +943,23 @@ export default function PecadosPage() {
       });
   };
 
+  // Cantidad de productos con interesados pendientes (badge de la pestaña)
+  useEffect(() => {
+    if (!isAdmin) return;
+    fetch("/api/admin/interesados", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d?.interests) return;
+        const skus = new Set<string>(
+          d.interests
+            .filter((i: { status: string }) => i.status === "pending")
+            .map((i: { productSku: string }) => i.productSku)
+        );
+        setPendingInterestCount(skus.size);
+      })
+      .catch(() => {});
+  }, [isAdmin]);
+
   // Save WhatsApp number directly to PostgreSQL
   const handleSaveWhatsapp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -965,19 +985,26 @@ export default function PecadosPage() {
   };
 
   // Cart operations (deshabilitadas en Modo Administrador)
+  // Máximo de unidades para "Me interesa" (productos sin stock)
+  const MAX_INTEREST_QTY = 10;
+  const cartItemMax = (product: Product, interest?: boolean) =>
+    interest ? MAX_INTEREST_QTY : product.stock;
+
   const addToCart = (product: Product, quantity = 1) => {
     if (isAdmin) return;
-    if (product.stock <= 0) return;
+    // Sin stock: se agrega como "Me interesa" (no es una compra ni descuenta stock)
+    const interest = product.stock <= 0;
+    const max = cartItemMax(product, interest);
 
     setCart((prev) => {
       const existing = prev.find((item) => item.product.id === product.id);
       if (existing) {
-        const newQty = Math.min(existing.quantity + quantity, product.stock);
+        const newQty = Math.min(existing.quantity + quantity, cartItemMax(product, existing.interest));
         return prev.map((item) =>
           item.product.id === product.id ? { ...item, quantity: newQty } : item
         );
       }
-      return [...prev, { product, quantity: Math.min(quantity, product.stock) }];
+      return [...prev, { product, quantity: Math.min(quantity, max), interest }];
     });
     setIsCartOpen(true);
   };
@@ -991,7 +1018,7 @@ export default function PecadosPage() {
             const currentStock = products.find((p) => p.id === productId)?.stock || item.product.stock;
             const newQty = item.quantity + delta;
             if (newQty <= 0) return null;
-            return { ...item, quantity: Math.min(newQty, currentStock) };
+            return { ...item, quantity: Math.min(newQty, item.interest ? MAX_INTEREST_QTY : currentStock) };
           }
           return item;
         })
@@ -1011,22 +1038,30 @@ export default function PecadosPage() {
     return product.precioEfectivo || product.price;
   };
 
-  const cartTotal = cart.reduce((sum, item) => sum + getItemUnitPrice(item.product, cartPaymentMethod) * item.quantity, 0);
+  const purchaseCartItems = cart.filter((item) => !item.interest);
+  const interestCartItems = cart.filter((item) => item.interest);
+  const cartTotal = purchaseCartItems.reduce((sum, item) => sum + getItemUnitPrice(item.product, cartPaymentMethod) * item.quantity, 0);
   const cartItemsCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   // Checkout WhatsApp generator + Automatic Sale Record
   const handleCheckoutWhatsApp = () => {
     if (cart.length === 0) return;
+    const hasPurchase = purchaseCartItems.length > 0;
+    const hasInterest = interestCartItems.length > 0;
 
-    let message = "🔥 *¡Hola Pecados Serranos!* Quiero realizar el siguiente pedido:\n\n";
-    message += `💳 *Medio de Pago Seleccionado:* ${
-      cartPaymentMethod === "tarjeta" ? "Tarjeta de Crédito / Débito (+10%)" : "Efectivo / Transferencia Bancaria"
-    }\n\n`;
-    message += "📦 *Detalle del Pedido:*\n";
+    let message = hasPurchase
+      ? "🔥 *¡Hola Pecados Serranos!* Quiero realizar el siguiente pedido:\n\n"
+      : "🔥 *¡Hola Pecados Serranos!* Me interesan estos productos que hoy están sin stock:\n\n";
+    if (hasPurchase) {
+      message += `💳 *Medio de Pago Seleccionado:* ${
+        cartPaymentMethod === "tarjeta" ? "Tarjeta de Crédito / Débito (+10%)" : "Efectivo / Transferencia Bancaria"
+      }\n\n`;
+      message += "📦 *Detalle del Pedido:*\n";
+    }
 
     const saleItems: SaleItem[] = [];
 
-    cart.forEach((item) => {
+    purchaseCartItems.forEach((item) => {
       const unitP = getItemUnitPrice(item.product, cartPaymentMethod);
       const itemSubtotal = unitP * item.quantity;
       const skuText = item.product.sku ? ` [Cod: ${item.product.sku}]` : "";
@@ -1043,7 +1078,18 @@ export default function PecadosPage() {
       });
     });
 
-    message += `\n💰 *Total a Pagar:* $${cartTotal.toLocaleString("es-AR")}\n`;
+    if (hasPurchase) {
+      message += `\n💰 *Total a Pagar:* $${cartTotal.toLocaleString("es-AR")}\n`;
+    }
+
+    if (hasInterest) {
+      message += hasPurchase ? "\n🙋 *Además me interesan (sin stock):*\n" : "🙋 *Me interesan:*\n";
+      interestCartItems.forEach((item) => {
+        const skuText = item.product.sku ? ` [Cod: ${item.product.sku}]` : "";
+        message += `• ${item.quantity}x ${item.product.title}${skuText}\n`;
+      });
+      message += "Avisame cuando vuelvan a entrar, por favor.\n";
+    }
 
     if (buyerName.trim()) {
       message += `👤 *Cliente:* ${buyerName.trim()}\n`;
@@ -1052,11 +1098,13 @@ export default function PecadosPage() {
       message += `📍 *Dirección/Entrega:* ${buyerAddress.trim()}\n`;
     }
 
-    message += "\n¿Me confirman disponibilidad y coordinamos la entrega? ¡Muchas gracias!";
+    message += hasPurchase
+      ? "\n¿Me confirman disponibilidad y coordinamos la entrega? ¡Muchas gracias!"
+      : "\n¡Muchas gracias!";
 
-    // Deduct stock locally
+    // Deduct stock locally (sólo productos comprados, no los de interés)
     const updatedProducts = products.map((p) => {
-      const inCart = cart.find((c) => c.product.id === p.id);
+      const inCart = purchaseCartItems.find((c) => c.product.id === p.id);
       if (inCart) {
         return { ...p, stock: Math.max(0, p.stock - inCart.quantity) };
       }
@@ -1065,18 +1113,36 @@ export default function PecadosPage() {
 
     // Registrar el pedido en el servidor (precios y stock se validan del lado del servidor)
     setProducts(updatedProducts);
-    fetch("/api/pedidos", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        items: saleItems.map((i) => ({ sku: i.productSku, quantity: i.quantity })),
-        paymentMethod: cartPaymentMethod,
-        buyerName: buyerName.trim(),
-        buyerAddress: buyerAddress.trim(),
-      }),
-    })
-      .catch((err) => console.error("Error registrando el pedido:", err))
-      .finally(() => fetchServerData());
+    const requests: Promise<unknown>[] = [];
+    if (hasPurchase) {
+      requests.push(
+        fetch("/api/pedidos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: saleItems.map((i) => ({ sku: i.productSku, quantity: i.quantity })),
+            paymentMethod: cartPaymentMethod,
+            buyerName: buyerName.trim(),
+            buyerAddress: buyerAddress.trim(),
+          }),
+        }).catch((err) => console.error("Error registrando el pedido:", err))
+      );
+    }
+    if (hasInterest) {
+      // Registro de interés: no es una venta ni descuenta stock
+      requests.push(
+        fetch("/api/interes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: interestCartItems.map((i) => ({ sku: i.product.sku, quantity: i.quantity })),
+            buyerName: buyerName.trim(),
+            buyerAddress: buyerAddress.trim(),
+          }),
+        }).catch((err) => console.error("Error registrando el interés:", err))
+      );
+    }
+    Promise.all(requests).finally(() => fetchServerData());
 
     // Clear cart & notify
     setCart([]);
@@ -1901,6 +1967,21 @@ export default function PecadosPage() {
                 )}
               </button>
               <button
+                onClick={() => setAdminTab("interests")}
+                className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap text-xs ${
+                  adminTab === "interests"
+                    ? "bg-red-600 text-white shadow-sm"
+                    : "text-zinc-300 hover:text-white hover:bg-red-900/40"
+                }`}
+              >
+                <HandHeart className="w-3.5 h-3.5" /> Interesados / Pedido
+                {pendingInterestCount > 0 && (
+                  <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-amber-400 text-black text-[10px] font-black flex items-center justify-center">
+                    {pendingInterestCount}
+                  </span>
+                )}
+              </button>
+              <button
                 onClick={() => setAdminTab("purchases")}
                 className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap text-xs ${
                   adminTab === "purchases"
@@ -2025,6 +2106,20 @@ export default function PecadosPage() {
         {/* ============================================================== */}
         {/* ADMIN TAB: STOCK CONTROL (Inventario Completo)                   */}
         {/* ============================================================== */}
+        {isAdmin && adminTab === "interests" && (
+          <InterestsTab
+            products={products}
+            onPendingCountChange={setPendingInterestCount}
+            onOpenImport={() => {
+              setImportFile(null);
+              setImportRows([]);
+              setImportStats(null);
+              setImportError("");
+              setShowImportModal(true);
+            }}
+          />
+        )}
+
         {isAdmin && adminTab === "stock" && (
           <div className="space-y-6 animate-fadeIn">
             {/* Header with Search, Filter & Actions */}
@@ -3576,15 +3671,15 @@ export default function PecadosPage() {
                                   <button
                                     type="button"
                                     onClick={() => addToCart(product, 1)}
-                                    disabled={!inStock}
-                                    className={`w-full sm:w-auto px-2.5 py-1 sm:px-3 sm:py-1 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                                    title={inStock ? "Agregar al carrito" : "Sin stock: avisanos que te interesa y te contactamos cuando vuelva"}
+                                    className={`w-full sm:w-auto px-2.5 py-1 sm:px-3 sm:py-1 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer hover:scale-105 active:scale-95 ${
                                       inStock
-                                        ? "bg-red-600 hover:bg-red-500 text-white shadow-sm shadow-red-950/50 hover:scale-105 active:scale-95"
-                                        : "bg-zinc-800/80 text-zinc-500 cursor-not-allowed"
+                                        ? "bg-red-600 hover:bg-red-500 text-white shadow-sm shadow-red-950/50"
+                                        : "bg-zinc-800 hover:bg-zinc-700 text-amber-300 border border-amber-800/60"
                                     }`}
                                   >
-                                    <Plus className="w-3 h-3" />
-                                    <span>Agregar</span>
+                                    {inStock ? <Plus className="w-3 h-3" /> : <HandHeart className="w-3 h-3" />}
+                                    <span>{inStock ? "Agregar" : "Me interesa"}</span>
                                   </button>
                                 ) : (
                                   <div className="flex items-center justify-between sm:justify-start gap-1 bg-zinc-950 border border-red-900/60 rounded-lg p-0.5">
@@ -3602,9 +3697,9 @@ export default function PecadosPage() {
                                     <button
                                       type="button"
                                       onClick={() => updateCartQuantity(product.id, 1)}
-                                      disabled={qtyInCart >= product.stock}
+                                      disabled={qtyInCart >= cartItemMax(product, cartItem?.interest)}
                                       className={`p-1 rounded transition-colors cursor-pointer ${
-                                        qtyInCart >= product.stock
+                                        qtyInCart >= cartItemMax(product, cartItem?.interest)
                                           ? "text-zinc-600 cursor-not-allowed"
                                           : "hover:bg-zinc-800 text-zinc-300 hover:text-white"
                                       }`}
@@ -3719,13 +3814,25 @@ export default function PecadosPage() {
                       </button>
                     </div>
                   ) : (
-                    cart.map((item) => {
+                    [...purchaseCartItems, ...interestCartItems].map((item, idx) => {
                       const unitP = getItemUnitPrice(item.product, cartPaymentMethod);
                       const itemSubtotal = unitP * item.quantity;
                       return (
+                        <React.Fragment key={item.product.id}>
+                        {item.interest && idx === purchaseCartItems.length && (
+                          <div className={purchaseCartItems.length > 0 ? "pt-3 border-t border-zinc-800" : ""}>
+                            <h3 className="text-xs font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                              <HandHeart className="w-3.5 h-3.5" /> Me interesa (sin stock)
+                            </h3>
+                            <p className="text-[11px] text-zinc-400 mt-0.5 leading-snug">
+                              No es una compra ni suma al total: le avisamos a la tienda que te interesan y te contactan cuando vuelvan a entrar.
+                            </p>
+                          </div>
+                        )}
                         <div
-                          key={item.product.id}
-                          className="flex items-center gap-3.5 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800/70"
+                          className={`flex items-center gap-3.5 p-3 rounded-xl border ${
+                            item.interest ? "bg-amber-950/10 border-amber-900/50" : "bg-zinc-900/60 border-zinc-800/70"
+                          }`}
                         >
                           <div className="relative w-16 h-16 rounded-lg overflow-hidden bg-zinc-950 shrink-0 border border-zinc-800">
                             <Image
@@ -3753,15 +3860,23 @@ export default function PecadosPage() {
                                 {item.product.title}
                               </h4>
                             </div>
-                            <p className="text-[11px] text-zinc-400 mt-0.5">
-                              ${unitP.toLocaleString("es-AR")} c/u
-                              {cartPaymentMethod === "tarjeta" && (
-                                <span className="text-[9px] text-blue-400 ml-1">(Tarjeta +10%)</span>
-                              )}
-                            </p>
-                            <span className="text-xs font-black text-red-400 mt-1 block font-mono">
-                              ${itemSubtotal.toLocaleString("es-AR")}
-                            </span>
+                            {item.interest ? (
+                              <p className="text-[11px] text-amber-300/90 mt-0.5">
+                                Sin stock · {item.quantity} {item.quantity === 1 ? "unidad" : "unidades"} de interés
+                              </p>
+                            ) : (
+                              <>
+                                <p className="text-[11px] text-zinc-400 mt-0.5">
+                                  ${unitP.toLocaleString("es-AR")} c/u
+                                  {cartPaymentMethod === "tarjeta" && (
+                                    <span className="text-[9px] text-blue-400 ml-1">(Tarjeta +10%)</span>
+                                  )}
+                                </p>
+                                <span className="text-xs font-black text-red-400 mt-1 block font-mono">
+                                  ${itemSubtotal.toLocaleString("es-AR")}
+                                </span>
+                              </>
+                            )}
                           </div>
 
                           {/* Controls */}
@@ -3785,9 +3900,9 @@ export default function PecadosPage() {
                               </span>
                               <button
                                 onClick={() => updateCartQuantity(item.product.id, 1)}
-                                disabled={item.quantity >= item.product.stock}
+                                disabled={item.quantity >= cartItemMax(item.product, item.interest)}
                                 className={`p-1 rounded ${
-                                  item.quantity >= item.product.stock
+                                  item.quantity >= cartItemMax(item.product, item.interest)
                                     ? "text-zinc-600"
                                     : "hover:bg-zinc-800 text-zinc-400 hover:text-white"
                                 }`}
@@ -3797,6 +3912,7 @@ export default function PecadosPage() {
                             </div>
                           </div>
                         </div>
+                        </React.Fragment>
                       );
                     })
                   )}
@@ -3827,12 +3943,14 @@ export default function PecadosPage() {
                     </div>
 
                     {/* Total */}
-                    <div className="pt-2 border-t border-zinc-800/80 flex items-center justify-between">
-                      <span className="text-sm font-medium text-zinc-400">Total a Pagar</span>
-                      <span className="text-2xl font-black text-white font-mono">
-                        ${cartTotal.toLocaleString("es-AR")}
-                      </span>
-                    </div>
+                    {purchaseCartItems.length > 0 && (
+                      <div className="pt-2 border-t border-zinc-800/80 flex items-center justify-between">
+                        <span className="text-sm font-medium text-zinc-400">Total a Pagar</span>
+                        <span className="text-2xl font-black text-white font-mono">
+                          ${cartTotal.toLocaleString("es-AR")}
+                        </span>
+                      </div>
+                    )}
 
                     {/* Checkout Button */}
                     <button
@@ -3840,7 +3958,9 @@ export default function PecadosPage() {
                       className="w-full py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                     >
                       <Phone className="w-4 h-4" />
-                      <span>Pedir por WhatsApp</span>
+                      <span>
+                        {purchaseCartItems.length > 0 ? "Pedir por WhatsApp" : "Avisar que me interesa por WhatsApp"}
+                      </span>
                     </button>
 
                     <p className="text-[10px] text-center text-zinc-500 leading-tight">

@@ -34,6 +34,7 @@ export interface CartItem {
   product: Product;
   quantity: number;
   paymentMethod?: "efectivo" | "tarjeta"; // Si se calcula a precio efectivo o tarjeta
+  interest?: boolean; // Producto sin stock: "Me interesa" (no es compra ni descuenta stock)
 }
 
 export interface SaleItem {
@@ -247,3 +248,25 @@ export const PRESET_IMAGES = [
   { label: "Logo Pecados Serranos", url: "/pecados/logo.jpg" },
 ];
 
+
+export interface ProductInterest {
+  id: string;
+  productId?: string | null;
+  productSku: string;
+  productTitle: string;
+  quantity: number;
+  buyerName: string;
+  notes: string;
+  status: "pending" | "ordered" | "closed";
+  createdAt: string;
+}
+
+export interface PurchasePlanItem {
+  productSku: string;
+  productTitle: string;
+  tipo: string;
+  quantity: number;
+  costoSinIva: number;
+  image: string;
+  fromInterest: boolean;
+}
