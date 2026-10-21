@@ -1,0 +1,123 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model PecadoProduct {
+  id                    String   @id @default(cuid())
+  sku                   String   @unique
+  tipo                  String   @default("Conjunto de lencería")
+  category              String   @default("Conjunto de lencería")
+  title                 String
+  description           String   @default("")
+  costoSinIva           Float    @default(0)
+  costoConIva           Float    @default(0)
+  multiplicadorGanancia  Float    @default(2.0)
+  gananciaSugerida      Float    @default(0)
+  precioEfectivo        Float    @default(0)
+  precioTarjeta         Float    @default(0)
+  precioFinalProveedor  Float    @default(0)
+  stock                 Int      @default(0)
+  minStock              Int      @default(2)
+  observaciones         String   @default("")
+  image                 String   @default("/pecados/auriculares.jpg")
+  active                Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([sku])
+  @@index([tipo])
+}
+
+model PecadoReseller {
+  id                String   @id @default(cuid())
+  name              String
+  phone             String   @default("")
+  zone              String   @default("")
+  commissionPercent Float    @default(15)
+  notes             String   @default("")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model PecadoSale {
+  id            String           @id @default(cuid())
+  date          DateTime         @default(now())
+  buyerName     String           @default("Cliente Mostrador")
+  buyerPhone    String           @default("")
+  channel       String           @default("direct_sale")
+  resellerId    String?
+  resellerName  String?
+  totalAmount   Float            @default(0)
+  paymentMethod String           @default("efectivo")
+  status        String           @default("completed")
+  notes         String           @default("")
+  createdAt     DateTime         @default(now())
+  items         PecadoSaleItem[]
+
+  @@index([date])
+}
+
+model PecadoSaleItem {
+  id           String     @id @default(cuid())
+  saleId       String
+  sale         PecadoSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId    String?
+  productSku   String     @default("S/C")
+  productTitle String
+  quantity     Int        @default(1)
+  unitPrice    Float      @default(0)
+  subtotal     Float      @default(0)
+
+  @@index([saleId])
+}
+
+model PecadoConsignment {
+  id               String   @id @default(cuid())
+  resellerId       String
+  resellerName     String
+  date             DateTime @default(now())
+  productId        String
+  productSku       String   @default("S/C")
+  productTitle     String
+  quantityGiven    Int      @default(0)
+  unitAgreedPrice  Float    @default(0)
+  quantitySold     Int      @default(0)
+  quantityReturned Int      @default(0)
+  status           String   @default("active")
+  notes            String   @default("")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([resellerId])
+  @@index([status])
+}
+
+model PecadoPurchase {
+  id                 String   @id
+  fileName           String   @default("Importación Excel")
+  date               DateTime @default(now())
+  source             String   @default("excel_import")
+  notes              String   @default("")
+  totalItems         Int      @default(0)
+  newItems           Int      @default(0)
+  restockItems       Int      @default(0)
+  totalUnits         Int      @default(0)
+  totalCostSinIva    Float    @default(0)
+  totalCostConIva    Float    @default(0)
+  totalSaleEstimated Float    @default(0)
+  rawItemsJson       String   @default("[]")
+  createdAt          DateTime @default(now())
+
+  @@index([date])
+}
+
+model PecadoSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @default(now())
+}
