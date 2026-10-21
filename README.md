@@ -142,3 +142,15 @@ docker compose up -d
 
 `SESSION_SECRET` debe ser un valor aleatorio de al menos 32 caracteres (`openssl rand -hex 32`).
 Cuando haya un reverse proxy con HTTPS delante, poner `TRUST_PROXY=true` y `COOKIE_SECURE=true`.
+
+## 🔒 HTTPS y dominio
+
+El servicio `caddy` del `docker-compose.yml` publica la tienda en `https://$DOMAIN` y obtiene/renueva
+el certificado de Let's Encrypt automáticamente (los certificados se guardan en el volumen `caddy_data`).
+
+Requisitos:
+- Registro DNS **A** del dominio (y `www`) apuntando a la IP del servidor.
+- Puertos **80 y 443** abiertos en el firewall del proveedor.
+- En `.env`: `DOMAIN=tu-dominio`, `TRUST_PROXY=true`, `COOKIE_SECURE=true`.
+
+La app (puerto 3000) y PostgreSQL (5432) sólo escuchan en `127.0.0.1`; el único acceso público es por Caddy.

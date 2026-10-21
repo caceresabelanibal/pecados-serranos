@@ -40,8 +40,31 @@ services:
     security_opt:
       - no-new-privileges:true
     ports:
-      - "${APP_PORT:-3000}:3000"
+      # Sólo localhost: el acceso público entra por Caddy (HTTPS)
+      - "${APP_PORT:-127.0.0.1:3000}:3000"
+
+  # Reverse proxy HTTPS (certificado automático Let's Encrypt)
+  caddy:
+    image: caddy:2-alpine
+    container_name: pecados_caddy
+    restart: always
+    depends_on:
+      - app
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
 
 volumes:
   postgres_data:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
     driver: local

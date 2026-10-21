@@ -1,0 +1,24 @@
+# -------------------------------------------------------------
+# Reverse proxy HTTPS para Pecados Serranos
+# Caddy obtiene y renueva automáticamente el certificado (Let's Encrypt)
+# -------------------------------------------------------------
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	# Límite de tamaño de las peticiones (imágenes de productos incluidas)
+	request_body {
+		max_size 10MB
+	}
+
+	reverse_proxy app:3000
+}
+
+# www -> dominio principal
+www.{$DOMAIN} {
+	redir https://{$DOMAIN}{uri} permanent
+}
