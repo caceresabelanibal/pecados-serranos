@@ -2065,30 +2065,7 @@ export default function PecadosPage() {
 
       {/* Main Store Header */}
       <header className="relative z-40 w-full border-b border-red-950/40 bg-black/75 backdrop-blur-md sticky top-0">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 sm:gap-4">
-            <Link href="/pecados" className="flex items-center gap-3 group">
-              <div className="relative h-11 w-11 sm:h-12 sm:w-12 rounded-xl overflow-hidden bg-black/60 border border-red-900/40 p-0.5 flex items-center justify-center shadow-lg shadow-red-950/50 group-hover:border-red-600/60 transition-colors">
-                <Image
-                  src="/pecados/logo-transparent.png"
-                  alt="Pecados Serranos Logo"
-                  width={96}
-                  height={96}
-                  className="h-full w-full object-contain"
-                  priority
-                />
-              </div>
-              <div className="flex flex-col">
-                <span className="text-lg sm:text-xl font-black tracking-tight text-white flex items-center gap-1.5 leading-none">
-                  Pecados <span className="text-red-500">Serranos</span>
-                </span>
-                <span className="text-[10px] sm:text-[11px] text-zinc-400 font-medium italic tracking-wide">
-                  Pueblo chico, infierno grande
-                </span>
-              </div>
-            </Link>
-          </div>
-
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-end gap-4">
           <div className="flex items-center gap-2.5 sm:gap-3">
             {/* Admin toggle button & Cart Trigger */}
             {!isAdmin ? (
