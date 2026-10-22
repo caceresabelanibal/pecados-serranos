@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getClientIp, isSameOriginJson, rateLimit } from "@/lib/auth";
+import { SKU_PATTERN, isProductComplete } from "@/lib/pricing";
 
 const MAX_ITEMS = 30;
 const MAX_QTY_PER_ITEM = 10;
@@ -40,7 +41,7 @@ export async function POST(request: Request) {
   for (const it of rawItems) {
     const sku = typeof it?.sku === "string" ? it.sku.trim().toUpperCase() : "";
     const qty = Number(it?.quantity);
-    if (!/^[A-Z0-9._-]{1,40}$/.test(sku) || !Number.isInteger(qty) || qty < 1 || qty > MAX_QTY_PER_ITEM) {
+    if (!SKU_PATTERN.test(sku) || !Number.isInteger(qty) || qty < 1 || qty > MAX_QTY_PER_ITEM) {
       return NextResponse.json({ error: "Solicitud inválida." }, { status: 400 });
     }
     wanted.set(sku, Math.min(MAX_QTY_PER_ITEM, (wanted.get(sku) || 0) + qty));
@@ -49,9 +50,8 @@ export async function POST(request: Request) {
   try {
     const products = await prisma.pecadoProduct.findMany({
       where: { sku: { in: [...wanted.keys()] }, active: true },
-      select: { id: true, sku: true, title: true },
     });
-    if (products.length !== wanted.size) {
+    if (products.length !== wanted.size || !products.every((p) => isProductComplete(p))) {
       return NextResponse.json({ error: "Algún producto ya no está disponible." }, { status: 404 });
     }
 

@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import type { Product, ProductInterest, PurchasePlanItem } from "@/app/products";
 import { buildPurchasePlanRows, PLAN_EXCEL_HEADERS } from "@/lib/purchase-plan-excel";
+import { SKU_PATTERN } from "@/lib/pricing";
 
 interface Props {
   products: Product[];
@@ -200,8 +201,8 @@ export default function InterestsTab({ products, onOpenImport, onPendingCountCha
   const addManual = (e: React.FormEvent) => {
     e.preventDefault();
     const sku = manual.sku.trim().toUpperCase();
-    if (!/^[A-Z0-9._-]{1,40}$/.test(sku)) {
-      alert("Ingresá un código válido (letras, números, punto, guion).");
+    if (!SKU_PATTERN.test(sku)) {
+      alert("Ingresá un código válido (letras, números, espacio, punto, guion).");
       return;
     }
     if (plan.some((i) => i.productSku === sku)) {

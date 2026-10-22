@@ -48,8 +48,20 @@ import {
   Printer,
   FileText,
   HandHeart,
+  Wallet,
+  AlertTriangle,
 } from "lucide-react";
 import InterestsTab from "@/app/components/InterestsTab";
+import CashFlowTab, { type PricingPatch } from "@/app/components/CashFlowTab";
+import {
+  MULTIPLIER_OPTIONS,
+  flujoDeCaja,
+  formatMoney,
+  isValidMultiplier,
+  missingFields,
+  precioPublicoTC,
+  proveedorConIva,
+} from "@/lib/pricing";
 import * as XLSX from "xlsx";
 import { VSHOP_CATALOG_DICT } from "@/lib/vshop-catalog-dict";
 import {
@@ -94,7 +106,7 @@ export default function PecadosPage() {
 
   // Admin state & navigation
   const [isAdmin, setIsAdmin] = useState(false);
-  const [adminTab, setAdminTab] = useState<"catalog" | "stock" | "interests" | "purchases" | "sales" | "resellers" | "settings">("catalog");
+  const [adminTab, setAdminTab] = useState<"catalog" | "cashflow" | "stock" | "interests" | "purchases" | "sales" | "resellers" | "settings">("catalog");
   const [pendingInterestCount, setPendingInterestCount] = useState(0);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [loginUser, setLoginUser] = useState("");
@@ -287,8 +299,9 @@ export default function PecadosPage() {
         restockCount++;
         const currentStock = existing.stock;
         const finalStock = currentStock + qty;
-        const cSin = (costoSinIva > 0 ? costoSinIva : existing.costoSinIva) || 0;
-        const cCon = (rawCostoConIva > 0 ? rawCostoConIva : existing.costoConIva) || 0;
+        // El costo cargado en Flujo de caja manda; sólo se toma el del Excel si no había uno
+        const cSin = (existing.costoSinIva && existing.costoSinIva > 0 ? existing.costoSinIva : costoSinIva) || 0;
+        const cCon = proveedorConIva(cSin);
 
         totalUnits += qty;
         totalCostConIva += cCon * qty;
@@ -301,9 +314,9 @@ export default function PecadosPage() {
           image: existing.image || rawImage || "/pecados/auriculares.jpg",
           costoSinIva: cSin,
           costoConIva: cCon,
-          multiplicador: existing.multiplicadorGanancia || 2.0,
-          precioEfectivo: existing.precioEfectivo ?? existing.price ?? 0,
-          precioTarjeta: existing.precioTarjeta ?? Math.round((existing.precioEfectivo ?? existing.price ?? 0) * 1.10),
+          multiplicador: isValidMultiplier(existing.multiplicadorGanancia) ? existing.multiplicadorGanancia : 0,
+          precioEfectivo: existing.precioEfectivo ?? 0,
+          precioTarjeta: precioPublicoTC(existing.precioEfectivo ?? 0),
           cantidadComprada: qty,
           stockActual: currentStock,
           stockFinal: finalStock,
@@ -317,10 +330,11 @@ export default function PecadosPage() {
         const tipo = vshopMatch?.tipo || rawTipo || "Sex Shop";
         const category = vshopMatch?.category || rawTipo || "Sex Shop";
         const cSin = costoSinIva;
-        const cCon = rawCostoConIva;
-        const mult = 2.0;
-        const precioEfectivo = Math.round((cCon * 2.5) / 100) * 100 || 5000;
-        const precioTarjeta = Math.round(precioEfectivo * 1.10);
+        const cCon = proveedorConIva(cSin);
+        // Multiplicador y Precio Público FT los define el administrador en Flujo de caja
+        const mult = 0;
+        const precioEfectivo = 0;
+        const precioTarjeta = 0;
 
         totalUnits += qty;
         totalCostConIva += cCon * qty;
@@ -330,7 +344,7 @@ export default function PecadosPage() {
           title,
           tipo,
           category,
-          image: rawImage || `/api/pecados/imagen/${sku}` || "/pecados/auriculares.jpg",
+          image: rawImage || `/api/pecados/imagen/${encodeURIComponent(sku)}`,
           costoSinIva: cSin,
           costoConIva: cCon,
           multiplicador: mult,
@@ -451,9 +465,9 @@ export default function PecadosPage() {
           updatedProducts[existingIndex] = {
             ...existing,
             stock: finalStock,
-            costoSinIva: item.costoSinIva > 0 ? item.costoSinIva : existing.costoSinIva,
-            costoConIva: item.costoConIva > 0 ? item.costoConIva : existing.costoConIva,
-            costPrice: item.costoConIva > 0 ? item.costoConIva : existing.costPrice,
+            costoSinIva: item.costoSinIva,
+            costoConIva: item.costoConIva,
+            costPrice: item.costoConIva,
             image:
               (!existing.image || existing.image.includes("auriculares")) && item.image
                 ? item.image
@@ -502,7 +516,7 @@ export default function PecadosPage() {
             precioEfectivo: item.precioEfectivo,
             price: item.precioEfectivo,
             precioTarjeta: item.precioTarjeta,
-            precioFinalProveedor: item.costoSinIva,
+            precioFinalProveedor: 0,
             stock: item.cantidadComprada,
             minStock: 2,
             observaciones: "Ingresado por importación de compra Excel",
@@ -564,8 +578,12 @@ export default function PecadosPage() {
 
       setRecentlyImportedMap(newImportedMap);
       setShowImportModal(false);
+      setAdminTab("cashflow");
       setImportSuccessBanner(
-        `Se importaron con éxito ${totalUnits} unidades en ${selectedItems.length} artículos (${addedCount} nuevos y ${restockedCount} con stock sumado). Registrado en Historial de Compras ("${newPurchaseRecord.fileName}").`
+        `Se importaron con éxito ${totalUnits} unidades en ${selectedItems.length} artículos (${addedCount} nuevos y ${restockedCount} con stock sumado). Registrado en Historial de Compras ("${newPurchaseRecord.fileName}").` +
+          (addedCount > 0
+            ? ` Los ${addedCount} artículos nuevos quedan INCOMPLETOS hasta que elijas el multiplicador y cargues el Precio Público FT: no se muestran en la tienda.`
+            : "")
       );
     } catch (err: any) {
       alert("Error al importar la compra: " + (err?.message || err));
@@ -1051,11 +1069,11 @@ export default function PecadosPage() {
   };
 
   // Price resolver based on payment method (Efectivo vs Tarjeta +10% formula)
-  const getItemUnitPrice = (product: Product, method: "efectivo" | "tarjeta" = cartPaymentMethod): number => {
-    if (method === "tarjeta") {
-      return product.precioTarjeta || calcularPrecioTarjeta(product.precioEfectivo || product.price);
-    }
-    return product.precioEfectivo || product.price;
+  // Precio único de la tienda: Precio Público TC (=FT*10/100+FT).
+  // El catálogo público ya llega con el TC calculado por el servidor (sin FT).
+  const getItemUnitPrice = (product: Product, _method?: "efectivo" | "tarjeta"): number => {
+    if (product.precioEfectivo) return precioPublicoTC(product.precioEfectivo);
+    return product.precioTarjeta || product.price || 0;
   };
 
   const purchaseCartItems = cart.filter((item) => !item.interest);
@@ -1073,9 +1091,6 @@ export default function PecadosPage() {
       ? "🔥 *¡Hola Pecados Serranos!* Quiero realizar el siguiente pedido:\n\n"
       : "🔥 *¡Hola Pecados Serranos!* Me interesan estos productos que hoy están sin stock:\n\n";
     if (hasPurchase) {
-      message += `💳 *Medio de Pago Seleccionado:* ${
-        cartPaymentMethod === "tarjeta" ? "Tarjeta de Crédito / Débito (+10%)" : "Efectivo / Transferencia Bancaria"
-      }\n\n`;
       message += "📦 *Detalle del Pedido:*\n";
     }
 
@@ -1086,7 +1101,7 @@ export default function PecadosPage() {
       const itemSubtotal = unitP * item.quantity;
       const skuText = item.product.sku ? ` [Cod: ${item.product.sku}]` : "";
       const tipoText = item.product.tipo ? ` (${item.product.tipo})` : "";
-      message += `• ${item.quantity}x ${item.product.title}${skuText}${tipoText} — $${itemSubtotal.toLocaleString("es-AR")} ($${unitP.toLocaleString("es-AR")} c/u)\n`;
+      message += `• ${item.quantity}x ${item.product.title}${skuText}${tipoText} — ${formatMoney(itemSubtotal)} (${formatMoney(unitP)} c/u)\n`;
 
       saleItems.push({
         productId: item.product.id,
@@ -1099,7 +1114,7 @@ export default function PecadosPage() {
     });
 
     if (hasPurchase) {
-      message += `\n💰 *Total a Pagar:* $${cartTotal.toLocaleString("es-AR")}\n`;
+      message += `\n💰 *Total a Pagar:* ${formatMoney(cartTotal)}\n`;
     }
 
     if (hasInterest) {
@@ -1141,7 +1156,6 @@ export default function PecadosPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             items: saleItems.map((i) => ({ sku: i.productSku, quantity: i.quantity })),
-            paymentMethod: cartPaymentMethod,
             buyerName: buyerName.trim(),
             buyerAddress: buyerAddress.trim(),
           }),
@@ -1182,12 +1196,13 @@ export default function PecadosPage() {
     // Generate automatic next SKU
     const count = products.length + 1;
     const nextSku = `PEC-${String(count).padStart(3, "0")}`;
-    const initialCostSinIva = 10000;
-    const initialCostConIva = calcularCostoConIva(initialCostSinIva);
-    const initialMultiplier = DEFAULT_MULTIPLIER;
-    const initialSuggested = calcularGananciaSugerida(initialCostConIva, initialMultiplier);
-    const initialPriceEfectivo = initialSuggested;
-    const initialPriceTarjeta = calcularPrecioTarjeta(initialPriceEfectivo);
+    // Artículo nuevo: los valores del flujo de caja se cargan a mano (sin valores inventados)
+    const initialCostSinIva = 0;
+    const initialCostConIva = 0;
+    const initialMultiplier = 0;
+    const initialSuggested = 0;
+    const initialPriceEfectivo = 0;
+    const initialPriceTarjeta = 0;
 
     setEditingProduct(null);
     setProdForm({
@@ -1214,12 +1229,13 @@ export default function PecadosPage() {
   };
 
   const openEditProductModal = (p: Product) => {
-    const cSinIva = p.costoSinIva || (p.costPrice ? Math.round(p.costPrice / (1 + IVA_RATE)) : 0);
-    const cConIva = p.costoConIva || p.costPrice || calcularCostoConIva(cSinIva);
-    const mult = p.multiplicadorGanancia || DEFAULT_MULTIPLIER;
-    const sug = p.gananciaSugerida || calcularGananciaSugerida(cConIva, mult);
-    const pEfec = p.precioEfectivo || p.price || sug;
-    const pTarj = p.precioTarjeta || calcularPrecioTarjeta(pEfec);
+    const c = flujoDeCaja(p);
+    const cSinIva = c.proveedorSinIva;
+    const cConIva = c.proveedorConIva;
+    const mult = c.multiplicador;
+    const sug = c.ganancia;
+    const pEfec = c.precioPublicoFT;
+    const pTarj = c.precioPublicoTC;
 
     setEditingProduct(p);
     setProdForm({
@@ -1287,12 +1303,14 @@ export default function PecadosPage() {
     }
 
     const cleanSku = prodForm.sku.trim().toUpperCase() || `PEC-${Date.now().toString().slice(-4)}`;
+    // Fórmulas del flujo de caja (mismas que la planilla y que el servidor)
     const costSinIva = Math.max(0, Number(prodForm.costoSinIva) || 0);
-    const costConIva = prodForm.costoConIva > 0 ? Number(prodForm.costoConIva) : calcularCostoConIva(costSinIva);
-    const mult = Number(prodForm.multiplicadorGanancia) || DEFAULT_MULTIPLIER;
-    const sug = prodForm.gananciaSugerida > 0 ? Number(prodForm.gananciaSugerida) : calcularGananciaSugerida(costConIva, mult);
-    const pEfec = Number(prodForm.precioEfectivo) || Number(prodForm.price) || sug;
-    const pTarj = prodForm.precioTarjeta > 0 ? Number(prodForm.precioTarjeta) : calcularPrecioTarjeta(pEfec);
+    const costConIva = proveedorConIva(costSinIva);
+    const multVal = Number(prodForm.multiplicadorGanancia);
+    const mult = isValidMultiplier(multVal) ? multVal : 0;
+    const sug = costConIva * mult;
+    const pEfec = Math.max(0, Number(prodForm.precioEfectivo) || 0);
+    const pTarj = precioPublicoTC(pEfec);
     const pProv = Math.max(0, Number(prodForm.precioFinalProveedor) || 0);
     const stockQty = Math.max(0, Number(prodForm.stock) || 0);
     const minStockQty = Math.max(0, Number(prodForm.minStock) || 0);
@@ -1350,6 +1368,49 @@ export default function PecadosPage() {
       persistAllData([newProd, ...products], sales, resellers, consignments);
     }
     setShowProductModal(false);
+
+    const missing = missingFields({
+      sku: cleanSku,
+      title: prodForm.title,
+      costoSinIva: costSinIva,
+      multiplicadorGanancia: mult,
+      precioEfectivo: pEfec,
+    });
+    if (missing.length > 0) {
+      alert(
+        `El artículo se guardó, pero está INCOMPLETO y no se mostrará en la tienda.\n\nFalta: ${missing.join(", ")}.\n\nPodés completarlo en la pestaña "Flujo de caja".`
+      );
+    }
+  };
+
+  // Edición en línea desde Flujo de caja (el servidor recalcula los valores derivados)
+  const handleUpdateProductPricing = (id: string, patch: PricingPatch) => {
+    const updated = products.map((p) => {
+      if (p.id !== id) return p;
+      const next = { ...p, ...patch };
+      const conIva = proveedorConIva(next.costoSinIva || 0);
+      const mult = isValidMultiplier(next.multiplicadorGanancia) ? next.multiplicadorGanancia : 0;
+      const ft = next.precioEfectivo || 0;
+      return {
+        ...next,
+        costoConIva: conIva,
+        costPrice: conIva,
+        multiplicadorGanancia: mult,
+        gananciaSugerida: conIva * mult,
+        precioEfectivo: ft,
+        price: ft,
+        precioTarjeta: precioPublicoTC(ft),
+      };
+    });
+    persistAllData(updated, sales, resellers, consignments);
+  };
+
+  const openImportModal = () => {
+    setImportFile(null);
+    setImportRows([]);
+    setImportStats(null);
+    setImportError("");
+    setShowImportModal(true);
   };
 
   // Quick adjust stock from stock table
@@ -1608,115 +1669,18 @@ export default function PecadosPage() {
 
   // Export Stock CSV matching VShop.xlsb structure and formulas
   const exportStockCSV = () => {
-    const headers = [
-      "TIPO",
-      "CODIGO",
-      "DESCRIPCION",
-      "SIN IVA c/u",
-      "CON IVA (+21%) c/u",
-      "GANANCIA SUGERIDA c/u",
-      "MULTIPLICADOR",
-      "CANTIDAD STOCK",
-      "SIN IVA TOTAL",
-      "CON IVA TOTAL",
-      "GANANCIA TOTAL",
-      "PUBLICO EFECTIVO c/u",
-      "PUBLICO TARJETA c/u (+10%)",
-      "PUBLICO EFECTIVO TOTAL",
-      "PUBLICO TARJETA TOTAL",
-      "MARGEN REAL $ (Efectivo - Costo c/IVA)",
-      "MARGEN %",
-      "PRECIO FINAL PROVEEDOR c/u",
-      "TOTAL INVERSION PROVEEDOR",
-      "OBSERVACIONES",
-    ];
-
+    const esc = (v: string) => `"${(v || "").replace(/"/g, '""')}"`;
+    const headers = ["CODIGO", "DESCRIPCION", "TIPO", "CANTIDAD", "PRECIO PUBLICO FT", "PRECIO PUBLICO TC"];
     const rows = products.map((p) => {
-      const cSinIva = p.costoSinIva || (p.costPrice ? Math.round(p.costPrice / (1 + IVA_RATE)) : 0);
-      const cConIva = p.costoConIva || p.costPrice || calcularCostoConIva(cSinIva);
-      const mult = p.multiplicadorGanancia || DEFAULT_MULTIPLIER;
-      const sug = p.gananciaSugerida || calcularGananciaSugerida(cConIva, mult);
-      const pEfec = p.precioEfectivo || p.price || sug;
-      const pTarj = p.precioTarjeta || calcularPrecioTarjeta(pEfec);
-      const subSinIva = cSinIva * p.stock;
-      const subConIva = cConIva * p.stock;
-      const subGanancia = sug * p.stock;
-      const totEfec = pEfec * p.stock;
-      const totTarj = pTarj * p.stock;
-      const margen$ = (pEfec - cConIva) * p.stock;
-      const margenPct = cConIva > 0 ? (((pEfec - cConIva) / cConIva) * 100).toFixed(1) + "%" : "0%";
-      const pProv = p.precioFinalProveedor || 0;
-      const totProv = pProv * p.stock;
-
-      return [
-        `"${(p.tipo || p.category || "").replace(/"/g, '""')}"`,
-        `"${(p.sku || "").replace(/"/g, '""')}"`,
-        `"${p.title.replace(/"/g, '""')}"`,
-        cSinIva,
-        cConIva,
-        sug,
-        mult,
-        p.stock,
-        subSinIva,
-        subConIva,
-        subGanancia,
-        pEfec,
-        pTarj,
-        totEfec,
-        totTarj,
-        margen$,
-        `"${margenPct}"`,
-        pProv,
-        totProv,
-        `"${(p.observaciones || "").replace(/"/g, '""')}"`,
-      ];
+      const c = flujoDeCaja(p);
+      return [esc(p.sku || ""), esc(p.title), esc(p.tipo || p.category || ""), p.stock, c.precioPublicoFT, c.precioPublicoTC];
     });
-
-    // Totales matching Row 47 in Excel
-    const totUnits = products.reduce((s, p) => s + p.stock, 0);
-    const totSinIva = products.reduce((s, p) => s + calcularSubtotalSinIva(p), 0);
-    const totConIva = products.reduce((s, p) => s + calcularSubtotalConIva(p), 0);
-    const totSug = products.reduce((s, p) => s + calcularSubtotalGanancia(p), 0);
-    const totEfec = products.reduce((s, p) => s + calcularTotalVentaEfectivo(p), 0);
-    const totTarj = products.reduce((s, p) => s + calcularTotalVentaTarjeta(p), 0);
-    const totMargen$ = totEfec - totConIva;
-    const totMargenPct = totConIva > 0 ? ((totMargen$ / totConIva) * 100).toFixed(1) + "%" : "0%";
-    const totProv = products.reduce((s, p) => s + calcularTotalProveedor(p), 0);
-
-    const totalRow = [
-      `"TOTALES"`,
-      `""`,
-      `"SUMA DE LOTE COMPLETO"`,
-      `""`,
-      `""`,
-      `""`,
-      `""`,
-      totUnits,
-      totSinIva,
-      totConIva,
-      totSug,
-      `""`,
-      `""`,
-      totEfec,
-      totTarj,
-      totMargen$,
-      `"${totMargenPct}"`,
-      `""`,
-      totProv,
-      `"Resumen general"`,
-    ];
-
-    const csvContent =
-      "\uFEFF" +
-      [headers.join(";"), ...rows.map((r) => r.join(";")), totalRow.join(";")].join("\n");
+    const csvContent = "\uFEFF" + [headers.join(";"), ...rows.map((r) => r.join(";"))].join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.setAttribute(
-      "download",
-      `Planilla_Stock_Pecados_Serranos_VShop_${new Date().toISOString().slice(0, 10)}.csv`
-    );
+    link.setAttribute("download", `Stock_Pecados_Serranos_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1817,6 +1781,7 @@ export default function PecadosPage() {
   const porcentajeMargenRealGlobal = totalCostConIva > 0 ? (totalMargenRealEfectivo / totalCostConIva) * 100 : 0;
   const lowStockCount = products.filter((p) => p.stock > 0 && p.stock <= (p.minStock ?? 2)).length;
   const outOfStockCount = products.filter((p) => p.stock <= 0).length;
+  const incompleteProductsCount = products.filter((p) => missingFields(p).length > 0).length;
 
   // Filtered products for stock tab
   const filteredStockProducts = products.filter((p) => {
@@ -1974,6 +1939,24 @@ export default function PecadosPage() {
                 <ShoppingBag className="w-3.5 h-3.5" /> Catálogo ({products.length})
               </button>
               <button
+                onClick={() => setAdminTab("cashflow")}
+                className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap text-xs ${
+                  adminTab === "cashflow"
+                    ? "bg-red-600 text-white shadow-sm"
+                    : "text-zinc-300 hover:text-white hover:bg-red-900/40"
+                }`}
+              >
+                <Wallet className="w-3.5 h-3.5" /> Flujo de caja
+                {incompleteProductsCount > 0 && (
+                  <span
+                    className="min-w-[18px] h-[18px] px-1 rounded-full bg-amber-400 text-black text-[10px] font-black flex items-center justify-center"
+                    title="Productos incompletos (no se muestran en la tienda)"
+                  >
+                    {incompleteProductsCount}
+                  </span>
+                )}
+              </button>
+              <button
                 onClick={() => setAdminTab("stock")}
                 className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap text-xs ${
                   adminTab === "stock"
@@ -2126,61 +2109,43 @@ export default function PecadosPage() {
         {/* ============================================================== */}
         {/* ADMIN TAB: STOCK CONTROL (Inventario Completo)                   */}
         {/* ============================================================== */}
+        {isAdmin && adminTab === "cashflow" && (
+          <CashFlowTab
+            products={products}
+            onUpdateProduct={handleUpdateProductPricing}
+            onEditProduct={openEditProductModal}
+            onOpenImport={openImportModal}
+            importSuccessBanner={importSuccessBanner}
+            onCloseImportBanner={() => setImportSuccessBanner(null)}
+            recentlyImported={recentlyImportedMap}
+          />
+        )}
+
         {isAdmin && adminTab === "interests" && (
           <InterestsTab
             products={products}
             onPendingCountChange={setPendingInterestCount}
-            onOpenImport={() => {
-              setImportFile(null);
-              setImportRows([]);
-              setImportStats(null);
-              setImportError("");
-              setShowImportModal(true);
-            }}
+            onOpenImport={openImportModal}
           />
         )}
 
         {isAdmin && adminTab === "stock" && (
           <div className="space-y-6 animate-fadeIn">
-            {/* Header with Search, Filter & Actions */}
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-zinc-800">
               <div>
                 <h2 className="text-2xl font-black text-white flex items-center gap-2">
-                  <Boxes className="w-6 h-6 text-red-500" /> Planilla Integral de Stock (Modelo VShop)
+                  <Boxes className="w-6 h-6 text-red-500" /> Stock
                 </h2>
                 <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-                  Control en tiempo real con fórmulas automáticas: <strong>IVA (+21%)</strong>, <strong>Multiplicador de ganancia</strong>, <strong>Tarjeta (+10%)</strong> y <strong>Margen Real</strong>.
+                  Cantidad y precios públicos de cada artículo (mismos valores que <strong>Flujo de caja</strong>).
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
                 <button
-                  type="button"
-                  onClick={() => {
-                    setImportFile(null);
-                    setImportRows([]);
-                    setImportStats(null);
-                    setImportError("");
-                    setShowImportModal(true);
-                  }}
-                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-red-950/40 transition-all cursor-pointer hover:scale-105 active:scale-95"
-                  title="Subir archivo Excel de compra para actualizar stock o agregar productos nuevos"
-                >
-                  <FileUp className="w-4 h-4" /> Importar Compra (Excel)
-                </button>
-                <button
                   onClick={exportStockCSV}
                   className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-2 shadow-lg transition-colors cursor-pointer"
-                  title="Descargar archivo Excel CSV con las 16 columnas y fórmulas"
                 >
-                  <FileSpreadsheet className="w-4 h-4" /> Exportar Planilla (CSV)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAdminTab("purchases")}
-                  className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-bold flex items-center gap-1.5 border border-zinc-700 transition-colors cursor-pointer"
-                  title="Ver el historial y reportes de todas las compras a proveedores cargadas"
-                >
-                  <FileSpreadsheet className="w-4 h-4 text-emerald-400" /> Historial de Compras ({purchases.length})
+                  <FileSpreadsheet className="w-4 h-4" /> Exportar Stock (CSV)
                 </button>
                 <button
                   onClick={openAddProductModal}
@@ -2191,52 +2156,12 @@ export default function PecadosPage() {
               </div>
             </div>
 
-            {/* Success Banner when a purchase was just imported */}
-            {importSuccessBanner && (
-              <div className="p-4 rounded-2xl bg-emerald-950/90 border border-emerald-700/80 text-emerald-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xl shadow-emerald-950/30 animate-fadeIn">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-xl bg-emerald-900/80 text-emerald-300 border border-emerald-700 shrink-0">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-sm text-white">Importación de Compra Guardada</h4>
-                    <p className="text-xs text-emerald-200 mt-0.5">{importSuccessBanner}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setOnlyShowImported(!onlyShowImported)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
-                      onlyShowImported
-                        ? "bg-white text-emerald-950 border-white"
-                        : "bg-emerald-900/60 hover:bg-emerald-800/80 text-emerald-200 border-emerald-700"
-                    }`}
-                  >
-                    {onlyShowImported ? "Ver todo el stock" : "Ver solo recién importados"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setImportSuccessBanner(null);
-                      setOnlyShowImported(false);
-                    }}
-                    className="p-1.5 rounded-lg hover:bg-emerald-900/60 text-emerald-300 cursor-pointer"
-                    title="Cerrar aviso"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Search and Category Filter Bar */}
             <div className="p-4 rounded-2xl bg-zinc-900/90 border border-zinc-800 flex flex-col md:flex-row items-stretch md:items-center gap-3">
               <div className="relative flex-1">
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
                 <input
                   type="text"
-                  placeholder="Buscar por código SKU (ej: B2900B), descripción, tipo u observaciones..."
+                  placeholder="Buscar por código, descripción o tipo..."
                   value={stockSearchQuery}
                   onChange={(e) => setStockSearchQuery(e.target.value)}
                   className="w-full pl-10 pr-4 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-red-500 transition-colors"
@@ -2250,23 +2175,6 @@ export default function PecadosPage() {
                   </button>
                 )}
               </div>
-
-              {/* Toggle para ver solo recién importados */}
-              {Object.keys(recentlyImportedMap).length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setOnlyShowImported(!onlyShowImported)}
-                  className={`px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
-                    onlyShowImported
-                      ? "bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-950/50"
-                      : "bg-zinc-950 hover:bg-zinc-800 text-zinc-300 border-zinc-800"
-                  }`}
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                  <span>{onlyShowImported ? "Ver todo" : `Recién importados (${Object.keys(recentlyImportedMap).length})`}</span>
-                </button>
-              )}
-
               <div className="flex items-center gap-2">
                 <span className="text-xs text-zinc-400 font-medium whitespace-nowrap">Tipo:</span>
                 <select
@@ -2284,294 +2192,120 @@ export default function PecadosPage() {
               </div>
             </div>
 
-            {/* KPI Cards matching VShop totals */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div className="p-4 rounded-2xl bg-zinc-900/80 border border-zinc-800">
-                <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider block">
-                  Unidades Totales
-                </span>
-                <span className="text-2xl sm:text-3xl font-black text-white mt-1 block font-mono">
-                  {totalStockUnits} <span className="text-sm font-normal text-zinc-400">un.</span>
-                </span>
-                <span className="text-[11px] text-zinc-500 mt-1 block">
-                  En {products.length} artículos {stockTypeFilter !== "Todos" ? `(${stockTypeFilter})` : ""}
-                </span>
+                <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider block">Unidades totales</span>
+                <span className="text-2xl sm:text-3xl font-black text-white mt-1 block font-mono">{totalStockUnits}</span>
               </div>
-
               <div className="p-4 rounded-2xl bg-zinc-900/80 border border-zinc-800">
-                <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider block">
-                  Costo de Compra (c/IVA 21%)
-                </span>
-                <span className="text-2xl sm:text-3xl font-black text-amber-400 mt-1 block font-mono">
-                  ${totalCostConIva.toLocaleString("es-AR")}
-                </span>
-                <span className="text-[11px] text-zinc-500 mt-1 block">
-                  Sin IVA: ${totalCostSinIva.toLocaleString("es-AR")}
-                </span>
+                <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider block">Sin stock</span>
+                <span className="text-2xl sm:text-3xl font-black text-red-400 mt-1 block font-mono">{outOfStockCount}</span>
               </div>
-
-              <div className="p-4 rounded-2xl bg-zinc-900/80 border border-zinc-800">
-                <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider block">
-                  Valor Venta Público (Efectivo)
-                </span>
-                <span className="text-2xl sm:text-3xl font-black text-emerald-400 mt-1 block font-mono">
-                  ${totalVentaEfectivo.toLocaleString("es-AR")}
-                </span>
-                <span className="text-[11px] text-zinc-400 mt-1 block">
-                  Tarjeta (+10%): <strong>${totalVentaTarjeta.toLocaleString("es-AR")}</strong>
-                </span>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-zinc-900/80 border border-zinc-800">
-                <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider block">
-                  Margen Real Estimado
-                </span>
-                <span className="text-2xl sm:text-3xl font-black text-red-400 mt-1 block font-mono">
-                  ${totalMargenRealEfectivo.toLocaleString("es-AR")}
-                </span>
-                <span className="text-[11px] text-emerald-400 font-bold mt-1 block">
-                  +{porcentajeMargenRealGlobal.toFixed(1)}% sobre costo c/IVA
-                </span>
-              </div>
+              <button
+                type="button"
+                onClick={() => setAdminTab("cashflow")}
+                className="p-4 rounded-2xl bg-zinc-900/80 border border-zinc-800 text-left hover:border-amber-700 transition-colors cursor-pointer"
+                title="Completar en Flujo de caja"
+              >
+                <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider block">Incompletos</span>
+                <span className="text-2xl sm:text-3xl font-black text-amber-400 mt-1 block font-mono">{incompleteProductsCount}</span>
+              </button>
             </div>
 
-            {/* Inventory Full VShop Table */}
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 overflow-hidden shadow-2xl">
               <div className="overflow-x-auto max-h-[75vh]">
-                <table className="w-full text-left text-xs whitespace-nowrap">
+                <table className="w-full text-left text-xs">
                   <thead className="bg-zinc-950/95 sticky top-0 z-20 border-b border-zinc-800 text-zinc-400 uppercase tracking-wider font-semibold text-[10px]">
                     <tr>
-                      <th className="p-3">Tipo</th>
                       <th className="p-3">Código</th>
-                      <th className="p-3">Descripción</th>
-                      <th className="p-3 text-right">Sin IVA</th>
-                      <th className="p-3 text-right text-amber-400">Con IVA (+21%)</th>
-                      <th className="p-3 text-center">Mult.</th>
-                      <th className="p-3 text-right text-rose-300">Ganancia Sug.</th>
+                      <th className="p-3">Artículo</th>
                       <th className="p-3 text-center">Cantidad</th>
-                      <th className="p-3 text-center">Ajuste Rápido</th>
-                      <th className="p-3 text-right font-bold text-amber-300">Con IVA Total</th>
-                      <th className="p-3 text-right text-emerald-400 font-bold">Púb. Efectivo</th>
-                      <th className="p-3 text-right text-blue-400">Púb. Tarjeta (+10%)</th>
-                      <th className="p-3 text-right font-black text-emerald-400">Venta Efectivo Tot.</th>
-                      <th className="p-3 text-right text-blue-300">Venta Tarjeta Tot.</th>
-                      <th className="p-3 text-right text-red-400">Margen Real ($ / %)</th>
-                      <th className="p-3">Observaciones</th>
+                      <th className="p-3 text-right text-emerald-400 whitespace-nowrap">Precio Publico FT</th>
+                      <th className="p-3 text-right text-blue-400 whitespace-nowrap">Precio Publico TC</th>
                       <th className="p-3 text-right">Acciones</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-zinc-800/60 font-mono text-xs">
+                  <tbody className="divide-y divide-zinc-800/60">
                     {filteredStockProducts.length === 0 ? (
                       <tr>
-                        <td colSpan={17} className="py-12 text-center text-zinc-500 font-sans">
+                        <td colSpan={6} className="py-12 text-center text-zinc-500">
                           No se encontraron artículos que coincidan con la búsqueda.
                         </td>
                       </tr>
                     ) : (
                       filteredStockProducts.map((p) => {
-                        const cSinIva = p.costoSinIva || (p.costPrice ? Math.round(p.costPrice / (1 + IVA_RATE)) : 0);
-                        const cConIva = p.costoConIva || p.costPrice || calcularCostoConIva(cSinIva);
-                        const mult = p.multiplicadorGanancia || DEFAULT_MULTIPLIER;
-                        const sug = p.gananciaSugerida || calcularGananciaSugerida(cConIva, mult);
-                        const pEfec = p.precioEfectivo || p.price || sug;
-                        const pTarj = p.precioTarjeta || calcularPrecioTarjeta(pEfec);
-                        const totConIva = cConIva * p.stock;
-                        const totEfec = pEfec * p.stock;
-                        const totTarj = pTarj * p.stock;
-                        const margen$ = (pEfec - cConIva) * p.stock;
-                        const margenPct = cConIva > 0 ? (((pEfec - cConIva) / cConIva) * 100).toFixed(0) : "0";
+                        const c = flujoDeCaja(p);
+                        const missing = missingFields(p);
                         const isOutOfStock = p.stock <= 0;
                         const isLow = p.stock > 0 && p.stock <= (p.minStock ?? 2);
-                        const importInfo = recentlyImportedMap[(p.sku || "").toUpperCase()];
-
                         return (
-                          <tr
-                            key={p.id}
-                            className={`transition-colors ${
-                              importInfo
-                                ? importInfo.type === "new"
-                                  ? "bg-emerald-950/30 border-l-4 border-l-emerald-500 hover:bg-emerald-950/45"
-                                  : "bg-blue-950/30 border-l-4 border-l-blue-500 hover:bg-blue-950/45"
-                                : "hover:bg-zinc-800/40"
-                            }`}
-                          >
-                            {/* Tipo */}
-                            <td className="p-3 font-sans">
-                              <span className="px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 text-[10px] font-medium border border-zinc-700">
-                                {p.tipo || p.category || "General"}
-                              </span>
-                            </td>
-
-                            {/* Código SKU con indicador de importación */}
-                            <td className="p-3 font-bold text-red-400">
-                              <div className="flex flex-col gap-1 items-start">
-                                <span>{p.sku || "S/C"}</span>
-                                {importInfo && (
-                                  <span
-                                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border shadow-xs animate-pulse ${
-                                      importInfo.type === "new"
-                                        ? "bg-emerald-950/95 text-emerald-300 border-emerald-600/80 shadow-emerald-950/40"
-                                        : "bg-blue-950/95 text-blue-300 border-blue-600/80 shadow-blue-950/40"
-                                    }`}
-                                  >
-                                    {importInfo.type === "new" ? (
-                                      <>
-                                        <Sparkles className="w-2.5 h-2.5 text-emerald-400" />
-                                        <span>Nuevo (+{importInfo.addedQty} u.)</span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Boxes className="w-2.5 h-2.5 text-blue-400" />
-                                        <span>+Stock (+{importInfo.addedQty} u.)</span>
-                                      </>
-                                    )}
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-
-                            {/* Descripción con miniatura */}
-                            <td className="p-3 font-sans">
-                              <div className="flex items-center gap-2 max-w-[240px]">
-                                <div className="relative w-7 h-7 rounded-lg overflow-hidden bg-black shrink-0 border border-zinc-700">
-                                  <Image
-                                    src={p.image || "/pecados/auriculares.jpg"}
-                                    alt={p.title}
-                                    fill
-                                    unoptimized={true}
-                                    className="object-cover"
-                                  />
+                          <tr key={p.id} className={missing.length > 0 ? "bg-amber-950/15" : "hover:bg-zinc-800/40"}>
+                            <td className="p-3 font-mono font-bold text-red-400 whitespace-nowrap">{p.sku || "S/C"}</td>
+                            <td className="p-3">
+                              <div className="flex items-center gap-2 min-w-[200px]">
+                                <div className="relative w-8 h-8 rounded-lg overflow-hidden bg-black shrink-0 border border-zinc-700">
+                                  <Image src={p.image || "/pecados/auriculares.jpg"} alt={p.title} fill unoptimized={true} className="object-cover" />
                                 </div>
-                                <span className="font-bold text-white truncate" title={p.title}>
-                                  {p.title}
-                                </span>
+                                <div className="min-w-0">
+                                  <span className="font-bold text-white line-clamp-1" title={p.title}>
+                                    {p.title}
+                                  </span>
+                                  <span className="text-[10px] text-zinc-500">{p.tipo || p.category}</span>
+                                  {missing.length > 0 && (
+                                    <span className="flex items-center gap-1 text-[10px] font-bold text-amber-300">
+                                      <AlertTriangle className="w-3 h-3 shrink-0" /> Incompleto: falta {missing.join(", ")}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             </td>
-
-                            {/* SIN IVA */}
-                            <td className="p-3 text-right text-zinc-400">
-                              ${cSinIva.toLocaleString("es-AR")}
-                            </td>
-
-                            {/* CON IVA */}
-                            <td className="p-3 text-right text-amber-300 font-semibold">
-                              ${cConIva.toLocaleString("es-AR")}
-                            </td>
-
-                            {/* Multiplicador */}
-                            <td className="p-3 text-center text-zinc-400">
-                              <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 text-[10px]">
-                                {mult}x
-                              </span>
-                            </td>
-
-                            {/* Ganancia Sugerida */}
-                            <td className="p-3 text-right text-rose-300">
-                              ${sug.toLocaleString("es-AR")}
-                            </td>
-
-                            {/* Cantidad Stock */}
-                            <td className="p-3 text-center font-bold">
-                              <span
-                                className={`px-2 py-0.5 rounded-full text-xs ${
-                                  isOutOfStock
-                                    ? "bg-red-950 text-red-400 border border-red-800"
-                                    : isLow
-                                    ? "bg-amber-950 text-amber-300 border border-amber-800"
-                                    : "bg-emerald-950/80 text-emerald-300 border border-emerald-800"
-                                }`}
-                              >
-                                {p.stock} un.
-                              </span>
-                            </td>
-
-                            {/* Quick Stock Adjust Buttons */}
-                            <td className="p-3 font-sans">
-                              <div className="flex items-center justify-center gap-0.5">
-                                <button
-                                  onClick={() => handleQuickAdjustStock(p.id, -5)}
-                                  title="Restar 5"
-                                  className="px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px]"
-                                >
-                                  -5
-                                </button>
+                            <td className="p-3">
+                              <div className="flex items-center justify-center gap-1">
                                 <button
                                   onClick={() => handleQuickAdjustStock(p.id, -1)}
                                   title="Restar 1"
-                                  className="p-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                                  className="p-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 cursor-pointer"
                                 >
                                   <Minus className="w-3 h-3" />
                                 </button>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-xs font-bold font-mono min-w-[44px] text-center ${
+                                    isOutOfStock
+                                      ? "bg-red-950 text-red-400 border border-red-800"
+                                      : isLow
+                                      ? "bg-amber-950 text-amber-300 border border-amber-800"
+                                      : "bg-emerald-950/80 text-emerald-300 border border-emerald-800"
+                                  }`}
+                                >
+                                  {p.stock}
+                                </span>
                                 <button
                                   onClick={() => handleQuickAdjustStock(p.id, 1)}
                                   title="Sumar 1"
-                                  className="p-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                                  className="p-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 cursor-pointer"
                                 >
                                   <Plus className="w-3 h-3" />
                                 </button>
-                                <button
-                                  onClick={() => handleQuickAdjustStock(p.id, 5)}
-                                  title="Sumar 5"
-                                  className="px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px]"
-                                >
-                                  +5
-                                </button>
                               </div>
                             </td>
-
-                            {/* CON IVA Total (Lote) */}
-                            <td className="p-3 text-right text-amber-400 font-bold">
-                              ${totConIva.toLocaleString("es-AR")}
+                            <td className="p-3 text-right font-mono text-emerald-300 whitespace-nowrap">
+                              {c.precioPublicoFT > 0 ? formatMoney(c.precioPublicoFT) : "—"}
                             </td>
-
-                            {/* Público Efectivo c/u */}
-                            <td className="p-3 text-right text-emerald-400 font-bold">
-                              ${pEfec.toLocaleString("es-AR")}
+                            <td className="p-3 text-right font-mono text-blue-300 font-bold whitespace-nowrap">
+                              {c.precioPublicoTC > 0 ? formatMoney(c.precioPublicoTC) : "—"}
                             </td>
-
-                            {/* Público Tarjeta c/u (+10%) */}
-                            <td className="p-3 text-right text-blue-400">
-                              ${pTarj.toLocaleString("es-AR")}
-                            </td>
-
-                            {/* Total Venta Efectivo */}
-                            <td className="p-3 text-right text-emerald-300 font-black">
-                              ${totEfec.toLocaleString("es-AR")}
-                            </td>
-
-                            {/* Total Venta Tarjeta */}
-                            <td className="p-3 text-right text-blue-300">
-                              ${totTarj.toLocaleString("es-AR")}
-                            </td>
-
-                            {/* Margen Real $ / % */}
                             <td className="p-3 text-right">
-                              <span className="text-red-400 font-bold block">
-                                ${margen$.toLocaleString("es-AR")}
-                              </span>
-                              <span className="text-[10px] text-zinc-400">
-                                ({margenPct}%)
-                              </span>
-                            </td>
-
-                            {/* Observaciones */}
-                            <td className="p-3 font-sans text-zinc-400 text-[11px] max-w-[180px] truncate" title={p.observaciones}>
-                              {p.observaciones || "—"}
-                            </td>
-
-                            {/* Acciones */}
-                            <td className="p-3 text-right font-sans">
                               <div className="flex items-center justify-end gap-1">
                                 <button
                                   onClick={() => openEditProductModal(p)}
-                                  className="p-1.5 rounded-lg hover:bg-zinc-700 text-zinc-400 hover:text-white"
+                                  className="p-1.5 rounded-lg hover:bg-zinc-700 text-zinc-400 hover:text-white cursor-pointer"
                                   title="Editar artículo"
                                 >
                                   <Edit3 className="w-3.5 h-3.5" />
                                 </button>
                                 <button
                                   onClick={() => handleDeleteProduct(p.id)}
-                                  className="p-1.5 rounded-lg hover:bg-red-950 text-zinc-500 hover:text-red-400"
+                                  className="p-1.5 rounded-lg hover:bg-red-950 text-zinc-500 hover:text-red-400 cursor-pointer"
                                   title="Eliminar artículo"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
@@ -2583,47 +2317,13 @@ export default function PecadosPage() {
                       })
                     )}
                   </tbody>
-
-                  {/* Summary Totales Row (Row 47 in Excel) */}
                   <tfoot className="bg-zinc-950 text-white font-black border-t-2 border-red-700 sticky bottom-0 z-20 text-xs">
                     <tr>
-                      <td colSpan={3} className="p-3.5 uppercase tracking-wider text-red-400">
-                        ∑ TOTALES DE PLANILLA ({filteredStockProducts.length} ítems)
+                      <td colSpan={2} className="p-3 uppercase tracking-wider text-red-400">
+                        Totales ({filteredStockProducts.length} artículos)
                       </td>
-                      <td className="p-3.5 text-right font-mono text-zinc-400">
-                        ${filteredStockProducts.reduce((s, p) => s + calcularSubtotalSinIva(p), 0).toLocaleString("es-AR")}
-                      </td>
-                      <td className="p-3.5 text-right font-mono text-amber-400">
-                        —
-                      </td>
-                      <td className="p-3.5 text-center text-zinc-500">—</td>
-                      <td className="p-3.5 text-right font-mono text-rose-300">
-                        ${filteredStockProducts.reduce((s, p) => s + calcularSubtotalGanancia(p), 0).toLocaleString("es-AR")}
-                      </td>
-                      <td className="p-3.5 text-center font-mono text-white text-sm">
-                        {filteredStockProducts.reduce((s, p) => s + p.stock, 0)} un.
-                      </td>
-                      <td className="p-3.5 text-center text-zinc-500">—</td>
-                      <td className="p-3.5 text-right font-mono text-amber-300 text-sm">
-                        ${filteredStockProducts.reduce((s, p) => s + calcularSubtotalConIva(p), 0).toLocaleString("es-AR")}
-                      </td>
-                      <td className="p-3.5 text-right font-mono text-zinc-500">—</td>
-                      <td className="p-3.5 text-right font-mono text-zinc-500">—</td>
-                      <td className="p-3.5 text-right font-mono text-emerald-400 text-sm">
-                        ${filteredStockProducts.reduce((s, p) => s + calcularTotalVentaEfectivo(p), 0).toLocaleString("es-AR")}
-                      </td>
-                      <td className="p-3.5 text-right font-mono text-blue-300 text-sm">
-                        ${filteredStockProducts.reduce((s, p) => s + calcularTotalVentaTarjeta(p), 0).toLocaleString("es-AR")}
-                      </td>
-                      <td className="p-3.5 text-right font-mono text-red-400 text-sm">
-                        ${(
-                          filteredStockProducts.reduce((s, p) => s + calcularTotalVentaEfectivo(p), 0) -
-                          filteredStockProducts.reduce((s, p) => s + calcularSubtotalConIva(p), 0)
-                        ).toLocaleString("es-AR")}
-                      </td>
-                      <td colSpan={2} className="p-3.5 text-right text-zinc-400 text-[11px] font-sans">
-                        Fórmulas activas VShop
-                      </td>
+                      <td className="p-3 text-center font-mono">{filteredStockProducts.reduce((t, p) => t + p.stock, 0)}</td>
+                      <td colSpan={3} />
                     </tr>
                   </tfoot>
                 </table>
@@ -3660,17 +3360,18 @@ export default function PecadosPage() {
 
                         <div className="mt-2.5 pt-2 border-t border-zinc-800/80 flex flex-col sm:flex-row sm:items-end justify-between gap-1.5">
                           <div className="min-w-0">
-                            <div className="flex items-baseline gap-1">
-                              <span className="text-sm sm:text-base font-black text-white font-mono">
-                                ${(product.precioEfectivo || product.price).toLocaleString("es-AR")}
-                              </span>
-                              <span className="px-1 py-0.2 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800/50 text-[8px] font-bold">
-                                Efec.
-                              </span>
-                            </div>
-                            <span className="text-[9px] text-zinc-400 font-medium block font-mono truncate">
-                              💳 ${(product.precioTarjeta || calcularPrecioTarjeta(product.precioEfectivo || product.price)).toLocaleString("es-AR")}
+                            <span className="text-sm sm:text-base font-black text-white font-mono block">
+                              {formatMoney(getItemUnitPrice(product))}
                             </span>
+                            {isAdmin && missingFields(product).length > 0 && (
+                              <span
+                                className="mt-0.5 flex items-start gap-1 text-[9px] font-bold text-amber-300 leading-tight"
+                                title="No se muestra en la tienda hasta completar estos datos (pestaña Flujo de caja)"
+                              >
+                                <AlertTriangle className="w-2.5 h-2.5 shrink-0 mt-px" />
+                                Incompleto: falta {missingFields(product).join(", ")}
+                              </span>
+                            )}
                           </div>
 
                           {/* Action Area */}
@@ -3787,37 +3488,6 @@ export default function PecadosPage() {
                   </button>
                 </div>
 
-                {/* Payment Method Selector (Efectivo vs Tarjeta +10% formula) */}
-                <div className="p-3 bg-zinc-950/80 border-b border-zinc-800 shrink-0">
-                  <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider block mb-1.5">
-                    Seleccioná tu medio de pago:
-                  </span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setCartPaymentMethod("efectivo")}
-                      className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                        cartPaymentMethod === "efectivo"
-                          ? "bg-emerald-600 text-white shadow-md shadow-emerald-950"
-                          : "bg-zinc-900 text-zinc-400 hover:text-white border border-zinc-800"
-                      }`}
-                    >
-                      <span>💵 Efectivo / Transf.</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCartPaymentMethod("tarjeta")}
-                      className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                        cartPaymentMethod === "tarjeta"
-                          ? "bg-red-600 text-white shadow-md shadow-red-950"
-                          : "bg-zinc-900 text-zinc-400 hover:text-white border border-zinc-800"
-                      }`}
-                    >
-                      <span>💳 Tarjeta (+10%)</span>
-                    </button>
-                  </div>
-                </div>
-
                 {/* Body items list */}
                 <div className="flex-1 overflow-y-auto p-5 space-y-4">
                   {cart.length === 0 ? (
@@ -3890,13 +3560,10 @@ export default function PecadosPage() {
                             ) : (
                               <>
                                 <p className="text-[11px] text-zinc-400 mt-0.5">
-                                  ${unitP.toLocaleString("es-AR")} c/u
-                                  {cartPaymentMethod === "tarjeta" && (
-                                    <span className="text-[9px] text-blue-400 ml-1">(Tarjeta +10%)</span>
-                                  )}
+                                  {formatMoney(unitP)} c/u
                                 </p>
                                 <span className="text-xs font-black text-red-400 mt-1 block font-mono">
-                                  ${itemSubtotal.toLocaleString("es-AR")}
+                                  {formatMoney(itemSubtotal)}
                                 </span>
                               </>
                             )}
@@ -3970,7 +3637,7 @@ export default function PecadosPage() {
                       <div className="pt-2 border-t border-zinc-800/80 flex items-center justify-between">
                         <span className="text-sm font-medium text-zinc-400">Total a Pagar</span>
                         <span className="text-2xl font-black text-white font-mono">
-                          ${cartTotal.toLocaleString("es-AR")}
+                          {formatMoney(cartTotal)}
                         </span>
                       </div>
                     )}
@@ -4478,208 +4145,133 @@ export default function PecadosPage() {
                   />
                 </div>
 
-                {/* Calculadora Financiera de Costos y Precios con Fórmulas VShop */}
+                {/* Flujo de caja: mismas fórmulas que la planilla VShop */}
                 <div className="p-3.5 rounded-xl bg-zinc-950/80 border border-zinc-800/80 space-y-3">
                   <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
                     <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                      📐 Fórmulas de Precios (Planilla VShop)
+                      <Wallet className="w-3.5 h-3.5 text-red-400" /> Flujo de caja
                     </span>
-                    <span className="text-[10px] text-zinc-400">
-                      IVA (+21%) • Ganancia • Tarjeta (+10%)
-                    </span>
+                    <span className="text-[10px] text-zinc-400">IVA 21% • Multiplicador • TC = FT +10%</span>
                   </div>
 
-                  {/* Fila 1: Costo Sin IVA y Con IVA (+21%) */}
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-[11px] text-zinc-400 font-medium block mb-1">
-                        Costo SIN IVA ($)
-                      </label>
+                      <label className="text-[11px] text-zinc-300 font-bold block mb-1">Proveedor SIN IVA ($)</label>
                       <input
                         type="number"
                         min={0}
-                        value={prodForm.costoSinIva}
+                        step="0.01"
+                        value={prodForm.costoSinIva || ""}
                         onChange={(e) => {
-                          const val = Number(e.target.value) || 0;
-                          const cCon = Math.round(val * (1 + IVA_RATE));
-                          const sug = Math.round(cCon * (prodForm.multiplicadorGanancia || DEFAULT_MULTIPLIER));
-                          const pEfec = sug;
-                          const pTarj = Math.round(pEfec * (1 + TARJETA_MARKUP));
+                          const val = Math.max(0, Number(e.target.value) || 0);
+                          const cCon = proveedorConIva(val);
                           setProdForm({
                             ...prodForm,
                             costoSinIva: val,
                             costoConIva: cCon,
-                            gananciaSugerida: sug,
-                            precioEfectivo: pEfec,
-                            price: pEfec,
-                            precioTarjeta: pTarj,
+                            gananciaSugerida: cCon * (prodForm.multiplicadorGanancia || 0),
                           });
                         }}
+                        placeholder="Obligatorio"
                         className="w-full px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-xs text-zinc-200 font-mono focus:outline-none focus:border-red-500"
                       />
                     </div>
-
                     <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <label className="text-[11px] text-amber-300 font-bold block">
-                          Costo CON IVA (+21%) ($)
-                        </label>
-                        <span className="text-[9px] text-amber-500 font-mono">Fórmula: SIN_IVA * 1.21</span>
+                      <label className="text-[11px] text-amber-300 font-bold block mb-1">Proveedor con IVA ($)</label>
+                      <div className="w-full px-3 py-1.5 rounded-xl bg-zinc-900/60 border border-zinc-800 text-xs text-amber-300 font-mono font-bold">
+                        {formatMoney(proveedorConIva(prodForm.costoSinIva))}
                       </div>
-                      <input
-                        type="number"
-                        min={0}
-                        value={prodForm.costoConIva}
-                        onChange={(e) => {
-                          const val = Number(e.target.value) || 0;
-                          const sug = Math.round(val * (prodForm.multiplicadorGanancia || DEFAULT_MULTIPLIER));
-                          const pEfec = sug;
-                          const pTarj = Math.round(pEfec * (1 + TARJETA_MARKUP));
-                          setProdForm({
-                            ...prodForm,
-                            costoConIva: val,
-                            gananciaSugerida: sug,
-                            precioEfectivo: pEfec,
-                            price: pEfec,
-                            precioTarjeta: pTarj,
-                          });
-                        }}
-                        className="w-full px-3 py-1.5 rounded-xl bg-zinc-900 border border-amber-900/60 text-xs text-amber-300 font-mono font-bold focus:outline-none focus:border-amber-500"
-                      />
                     </div>
                   </div>
 
-                  {/* Fila 2: Multiplicador y Ganancia Sugerida */}
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <label className="text-[11px] text-zinc-400 font-medium block">
-                          Multiplicador de Ganancia
-                        </label>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        {[1.5, 1.7, 2.0].map((m) => (
-                          <button
-                            key={m}
-                            type="button"
-                            onClick={() => {
-                              const sug = Math.round(prodForm.costoConIva * m);
-                              const pEfec = sug;
-                              const pTarj = Math.round(pEfec * (1 + TARJETA_MARKUP));
-                              setProdForm({
-                                ...prodForm,
-                                multiplicadorGanancia: m,
-                                gananciaSugerida: sug,
-                                precioEfectivo: pEfec,
-                                price: pEfec,
-                                precioTarjeta: pTarj,
-                              });
-                            }}
-                            className={`flex-1 py-1 rounded-lg text-xs font-mono font-bold transition-colors cursor-pointer ${
-                              prodForm.multiplicadorGanancia === m
-                                ? "bg-red-600 text-white shadow-sm"
-                                : "bg-zinc-900 text-zinc-400 hover:text-white border border-zinc-800"
-                            }`}
-                          >
-                            {m}x
-                          </button>
+                      <label className="text-[11px] text-zinc-300 font-bold block mb-1">Multiplicador de ganancia</label>
+                      <select
+                        value={isValidMultiplier(prodForm.multiplicadorGanancia) ? String(prodForm.multiplicadorGanancia) : ""}
+                        onChange={(e) => {
+                          const m = Number(e.target.value) || 0;
+                          setProdForm({
+                            ...prodForm,
+                            multiplicadorGanancia: m,
+                            gananciaSugerida: proveedorConIva(prodForm.costoSinIva) * m,
+                          });
+                        }}
+                        className={`w-full px-3 py-1.5 rounded-xl bg-zinc-900 border text-xs font-mono focus:outline-none focus:border-red-500 ${
+                          isValidMultiplier(prodForm.multiplicadorGanancia) ? "border-zinc-800 text-white" : "border-amber-600 text-amber-200"
+                        }`}
+                      >
+                        <option value="">Elegir…</option>
+                        {MULTIPLIER_OPTIONS.map((m) => (
+                          <option key={m} value={String(m)}>
+                            x{m.toFixed(1)}
+                          </option>
                         ))}
-                      </div>
+                      </select>
                     </div>
-
                     <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <label className="text-[11px] text-rose-300 font-medium block">
-                          Ganancia Sugerida ($)
-                        </label>
-                        <span className="text-[9px] text-rose-400 font-mono">CON_IVA * {prodForm.multiplicadorGanancia}x</span>
+                      <label className="text-[11px] text-rose-300 font-bold block mb-1">Ganancia ($)</label>
+                      <div className="w-full px-3 py-1.5 rounded-xl bg-zinc-900/60 border border-zinc-800 text-xs text-rose-300 font-mono font-bold">
+                        {formatMoney(
+                          proveedorConIva(prodForm.costoSinIva) *
+                            (isValidMultiplier(prodForm.multiplicadorGanancia) ? prodForm.multiplicadorGanancia : 0)
+                        )}
                       </div>
-                      <input
-                        type="number"
-                        min={0}
-                        value={prodForm.gananciaSugerida}
-                        readOnly
-                        className="w-full px-3 py-1.5 rounded-xl bg-zinc-900/60 border border-zinc-800 text-xs text-rose-300 font-mono font-bold cursor-not-allowed"
-                      />
                     </div>
                   </div>
 
-                  {/* Fila 3: Precios de Venta al Público (Efectivo vs Tarjeta +10%) */}
                   <div className="grid grid-cols-2 gap-3 pt-2 border-t border-zinc-800/60">
                     <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <label className="text-[11px] text-emerald-400 font-bold block">
-                          Público Efectivo c/u ($)
-                        </label>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const pEfec = prodForm.gananciaSugerida;
-                            const pTarj = Math.round(pEfec * (1 + TARJETA_MARKUP));
-                            setProdForm({
-                              ...prodForm,
-                              precioEfectivo: pEfec,
-                              price: pEfec,
-                              precioTarjeta: pTarj,
-                            });
-                          }}
-                          className="text-[9px] text-emerald-400 hover:text-emerald-300 underline"
-                        >
-                          Usar sugerido
-                        </button>
-                      </div>
+                      <label className="text-[11px] text-emerald-400 font-bold block mb-1">Precio Publico FT ($)</label>
                       <input
                         type="number"
-                        required
                         min={0}
-                        value={prodForm.precioEfectivo}
+                        step="0.01"
+                        value={prodForm.precioEfectivo || ""}
                         onChange={(e) => {
-                          const val = Number(e.target.value) || 0;
-                          const pTarj = Math.round(val * (1 + TARJETA_MARKUP));
-                          setProdForm({
-                            ...prodForm,
-                            precioEfectivo: val,
-                            price: val,
-                            precioTarjeta: pTarj,
-                          });
+                          const val = Math.max(0, Number(e.target.value) || 0);
+                          setProdForm({ ...prodForm, precioEfectivo: val, price: val, precioTarjeta: precioPublicoTC(val) });
                         }}
+                        placeholder="Obligatorio"
                         className="w-full px-3 py-1.5 rounded-xl bg-zinc-900 border border-emerald-800/80 text-xs text-emerald-300 font-mono font-black focus:outline-none focus:border-emerald-500"
                       />
                     </div>
-
                     <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <label className="text-[11px] text-blue-400 font-bold block">
-                          Público Tarjeta c/u (+10%) ($)
-                        </label>
-                        <span className="text-[9px] text-blue-400 font-mono">+10% recargo</span>
+                      <label className="text-[11px] text-blue-400 font-bold block mb-1">Precio Publico TC ($) — precio en la tienda</label>
+                      <div className="w-full px-3 py-1.5 rounded-xl bg-zinc-900/60 border border-blue-900/60 text-xs text-blue-300 font-mono font-bold">
+                        {formatMoney(precioPublicoTC(prodForm.precioEfectivo))}
                       </div>
-                      <input
-                        type="number"
-                        min={0}
-                        value={prodForm.precioTarjeta}
-                        onChange={(e) => setProdForm({ ...prodForm, precioTarjeta: Number(e.target.value) || 0 })}
-                        className="w-full px-3 py-1.5 rounded-xl bg-zinc-900 border border-blue-900/60 text-xs text-blue-300 font-mono font-bold focus:outline-none focus:border-blue-500"
-                      />
                     </div>
                   </div>
 
-                  {/* Margen Real Estimado Unitario */}
-                  <div className="p-2 rounded-lg bg-zinc-900/90 border border-zinc-800 flex items-center justify-between text-[11px]">
-                    <span className="text-zinc-400">Margen estimado en efectivo:</span>
-                    <span className="font-mono font-bold text-red-400">
-                      ${(prodForm.precioEfectivo - prodForm.costoConIva).toLocaleString("es-AR")}{" "}
-                      <span className="text-emerald-400 font-normal">
-                        ({prodForm.costoConIva > 0 ? (((prodForm.precioEfectivo - prodForm.costoConIva) / prodForm.costoConIva) * 100).toFixed(0) : 0}% s/costo)
+                  {missingFields({
+                    sku: prodForm.sku,
+                    title: prodForm.title,
+                    costoSinIva: prodForm.costoSinIva,
+                    multiplicadorGanancia: prodForm.multiplicadorGanancia,
+                    precioEfectivo: prodForm.precioEfectivo,
+                  }).length > 0 && (
+                    <p className="p-2 rounded-lg bg-amber-950/60 border border-amber-800 text-[11px] text-amber-200 flex items-start gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px text-amber-400" />
+                      <span>
+                        Incompleto: falta{" "}
+                        {missingFields({
+                          sku: prodForm.sku,
+                          title: prodForm.title,
+                          costoSinIva: prodForm.costoSinIva,
+                          multiplicadorGanancia: prodForm.multiplicadorGanancia,
+                          precioEfectivo: prodForm.precioEfectivo,
+                        }).join(", ")}
+                        . No se mostrará en la tienda hasta completarlo.
                       </span>
-                    </span>
-                  </div>
+                    </p>
+                  )}
                 </div>
 
-                {/* Stock, Mínimo y Control Proveedor */}
-                <div className="grid grid-cols-3 gap-3">
+                {/* Cantidad y stock mínimo */}
+                <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs text-zinc-400 font-medium block mb-1">Cantidad Stock</label>
+                    <label className="text-xs text-zinc-400 font-medium block mb-1">Cantidad</label>
                     <input
                       type="number"
                       required
@@ -4696,17 +4288,6 @@ export default function PecadosPage() {
                       min={0}
                       value={prodForm.minStock}
                       onChange={(e) => setProdForm({ ...prodForm, minStock: Number(e.target.value) })}
-                      className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-zinc-300 font-mono focus:outline-none focus:border-red-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-zinc-400 font-medium block mb-1">Precio Proveedor ($)</label>
-                    <input
-                      type="number"
-                      min={0}
-                      value={prodForm.precioFinalProveedor}
-                      onChange={(e) => setProdForm({ ...prodForm, precioFinalProveedor: Number(e.target.value) || 0 })}
-                      placeholder="Opcional"
                       className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-zinc-300 font-mono focus:outline-none focus:border-red-500"
                     />
                   </div>

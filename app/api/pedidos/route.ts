@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getClientIp, isSameOriginJson, rateLimit } from "@/lib/auth";
-import { calcularPrecioTarjeta } from "@/app/products";
+import { SKU_PATTERN, isProductComplete, precioPublicoTC } from "@/lib/pricing";
 
 const MAX_ITEMS = 30;
 const MAX_QTY_PER_ITEM = 10;
@@ -31,7 +31,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Solicitud inválida." }, { status: 400 });
   }
 
-  const paymentMethod = body?.paymentMethod === "tarjeta" ? "tarjeta" : "efectivo";
   const buyerName = typeof body?.buyerName === "string" ? body.buyerName.trim().slice(0, 80) : "";
   const buyerAddress = typeof body?.buyerAddress === "string" ? body.buyerAddress.trim().slice(0, 200) : "";
   const rawItems = Array.isArray(body?.items) ? body.items : [];
@@ -45,7 +44,7 @@ export async function POST(request: Request) {
   for (const it of rawItems) {
     const sku = typeof it?.sku === "string" ? it.sku.trim().toUpperCase() : "";
     const qty = Number(it?.quantity);
-    if (!/^[A-Z0-9._-]{1,40}$/.test(sku) || !Number.isInteger(qty) || qty < 1 || qty > MAX_QTY_PER_ITEM) {
+    if (!SKU_PATTERN.test(sku) || !Number.isInteger(qty) || qty < 1 || qty > MAX_QTY_PER_ITEM) {
       return NextResponse.json({ error: "Pedido inválido." }, { status: 400 });
     }
     wanted.set(sku, (wanted.get(sku) || 0) + qty);
@@ -56,15 +55,15 @@ export async function POST(request: Request) {
       const items: { productId: string; productSku: string; productTitle: string; quantity: number; unitPrice: number; subtotal: number }[] = [];
       for (const [sku, qty] of wanted) {
         const p = await tx.pecadoProduct.findUnique({ where: { sku } });
-        if (!p || !p.active) throw new Error("NOT_FOUND");
+        if (!p || !p.active || !isProductComplete(p)) throw new Error("NOT_FOUND");
         // Descuento atómico: sólo si hay stock suficiente
         const upd = await tx.pecadoProduct.updateMany({
           where: { id: p.id, stock: { gte: qty } },
           data: { stock: { decrement: qty } },
         });
         if (upd.count === 0) throw new Error("NO_STOCK");
-        const unitPrice =
-          paymentMethod === "tarjeta" ? p.precioTarjeta || calcularPrecioTarjeta(p.precioEfectivo) : p.precioEfectivo;
+        // Precio único de la tienda: Precio Público TC
+        const unitPrice = precioPublicoTC(p.precioEfectivo);
         items.push({
           productId: p.id,
           productSku: p.sku,
@@ -80,7 +79,7 @@ export async function POST(request: Request) {
           buyerName: buyerName || "Cliente Web WhatsApp",
           channel: "web_whatsapp",
           totalAmount: items.reduce((s, i) => s + i.subtotal, 0),
-          paymentMethod: paymentMethod === "tarjeta" ? "mercadopago" : "efectivo",
+          paymentMethod: "otro",
           status: "completed",
           notes: buyerAddress ? `Dirección: ${buyerAddress}` : "",
           items: { create: items },

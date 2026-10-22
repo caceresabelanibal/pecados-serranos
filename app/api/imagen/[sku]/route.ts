@@ -6,7 +6,7 @@ import { isAdminRequest, isSameOriginJson } from "@/lib/auth";
 
 const ALLOWED_IMAGE = /^data:(image\/(?:png|jpeg|jpg|webp|gif));base64,([A-Za-z0-9+/=]+)$/;
 const MAX_IMAGE_CHARS = 8 * 1024 * 1024; // ~6 MB de imagen
-const SKU_RE = /^[A-Z0-9._-]{1,40}$/;
+import { SKU_PATTERN as SKU_RE } from "@/lib/pricing";
 
 // GET /api/pecados/imagen/[sku]
 // Sirve la imagen del producto directamente desde PostgreSQL (Base64, URL o archivo local) usando su SKU

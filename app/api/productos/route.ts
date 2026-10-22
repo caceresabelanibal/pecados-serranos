@@ -3,6 +3,24 @@ import { prisma } from "@/lib/prisma";
 import type { Product, Sale, Reseller, Consignment, PurchaseRecord } from "@/app/products";
 import { INITIAL_PRODUCTS, INITIAL_RESELLERS, INITIAL_PURCHASES } from "@/lib/initial-data";
 import { isAdminRequest, isSameOriginJson } from "@/lib/auth";
+import { isProductComplete, isValidMultiplier, precioPublicoTC, proveedorConIva } from "@/lib/pricing";
+
+// Valores de precio normalizados con las fórmulas del flujo de caja (el servidor es la fuente de verdad)
+function normalizePricing(p: any) {
+  const costoSinIva = Math.max(0, Number(p.costoSinIva) || 0);
+  const costoConIva = proveedorConIva(costoSinIva);
+  const mult = Number(p.multiplicadorGanancia);
+  const multiplicadorGanancia = isValidMultiplier(mult) ? mult : 0;
+  const precioEfectivo = Math.max(0, Number(p.precioEfectivo ?? p.price) || 0);
+  return {
+    costoSinIva,
+    costoConIva,
+    multiplicadorGanancia,
+    gananciaSugerida: costoConIva * multiplicadorGanancia,
+    precioEfectivo,
+    precioTarjeta: precioPublicoTC(precioEfectivo),
+  };
+}
 
 // Cache de respaldo en memoria si la base de datos está desconectada
 let memoryProducts: Product[] = [...INITIAL_PRODUCTS];
@@ -161,6 +179,7 @@ const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate, proxy-
 
 // Campos de producto visibles para el público (sin costos, márgenes ni notas internas)
 function toPublicProduct(p: Product) {
+  const tc = precioPublicoTC(p.precioEfectivo ?? 0);
   return {
     id: p.id,
     sku: p.sku,
@@ -168,9 +187,8 @@ function toPublicProduct(p: Product) {
     category: p.category,
     title: p.title,
     description: p.description,
-    precioEfectivo: p.precioEfectivo ?? p.price,
-    price: p.price ?? p.precioEfectivo,
-    precioTarjeta: p.precioTarjeta,
+    price: tc,
+    precioTarjeta: tc,
     stock: p.stock,
     image: p.image,
   };
@@ -198,7 +216,9 @@ export async function GET(request: Request) {
   } catch {}
   return NextResponse.json(
     {
-      products: Array.isArray(data.products) ? data.products.map(toPublicProduct) : [],
+      products: Array.isArray(data.products)
+        ? data.products.filter((p: Product) => isProductComplete(p)).map(toPublicProduct)
+        : [],
       sales: [],
       resellers: [],
       consignments: [],
@@ -562,6 +582,7 @@ export async function POST(request: Request) {
         if (products && Array.isArray(products)) {
           for (const p of products) {
             const cleanSku = p.sku ? p.sku.trim().toUpperCase() : `PEC-${Date.now().toString().slice(-4)}`;
+            const pricing = normalizePricing(p);
             await prisma.pecadoProduct.upsert({
               where: { sku: cleanSku },
               update: {
@@ -569,12 +590,7 @@ export async function POST(request: Request) {
                 category: p.category || p.tipo || "Conjunto de lencería",
                 title: p.title,
                 description: p.description || "",
-                costoSinIva: p.costoSinIva || 0,
-                costoConIva: p.costoConIva || p.costPrice || 0,
-                multiplicadorGanancia: p.multiplicadorGanancia || 2.0,
-                gananciaSugerida: p.gananciaSugerida || 0,
-                precioEfectivo: p.precioEfectivo || p.price || 0,
-                precioTarjeta: p.precioTarjeta || 0,
+                ...pricing,
                 precioFinalProveedor: p.precioFinalProveedor || 0,
                 stock: p.stock ?? 0,
                 minStock: p.minStock ?? 2,
@@ -588,12 +604,7 @@ export async function POST(request: Request) {
                 category: p.category || p.tipo || "Conjunto de lencería",
                 title: p.title,
                 description: p.description || "",
-                costoSinIva: p.costoSinIva || 0,
-                costoConIva: p.costoConIva || p.costPrice || 0,
-                multiplicadorGanancia: p.multiplicadorGanancia || 2.0,
-                gananciaSugerida: p.gananciaSugerida || 0,
-                precioEfectivo: p.precioEfectivo || p.price || 0,
-                precioTarjeta: p.precioTarjeta || 0,
+                ...pricing,
                 precioFinalProveedor: p.precioFinalProveedor || 0,
                 stock: p.stock ?? 0,
                 minStock: p.minStock ?? 2,

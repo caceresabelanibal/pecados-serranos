@@ -1,3 +1,5 @@
+import { isValidMultiplier, precioPublicoTC, proveedorConIva } from "@/lib/pricing";
+
 export interface Product {
   id: string;
   sku: string; // Col 3: Código de producto (ej: B2900B, PEC-001)
@@ -131,22 +133,20 @@ export const IVA_RATE = 0.21; // 21% de IVA (Col 6: =E2*21/100+E2)
 export const TARJETA_MARKUP = 0.10; // 10% recargo tarjeta (Col 13: =L2*10/100+L2)
 export const DEFAULT_MULTIPLIER = 2.0; // Multiplicador estándar x2.0
 
-// 1. Costo CON IVA: costoSinIva * 1.21
+// 1. Proveedor con IVA: =SIN_IVA*21/100+SIN_IVA (sin redondeo, igual que la planilla)
 export function calcularCostoConIva(costoSinIva: number): number {
-  if (!costoSinIva || costoSinIva <= 0) return 0;
-  return Math.round(costoSinIva * (1 + IVA_RATE));
+  return proveedorConIva(costoSinIva);
 }
 
-// 2. Ganancia Sugerida: costoConIva * multiplicador (ej: x1.5, x1.7, x2.0)
-export function calcularGananciaSugerida(costoConIva: number, multiplicador = DEFAULT_MULTIPLIER): number {
-  if (!costoConIva || costoConIva <= 0) return 0;
-  return Math.round(costoConIva * (multiplicador || DEFAULT_MULTIPLIER));
+// 2. Ganancia: Proveedor con IVA * multiplicador (sin multiplicador elegido = 0)
+export function calcularGananciaSugerida(costoConIva: number, multiplicador = 0): number {
+  if (!costoConIva || costoConIva <= 0 || !isValidMultiplier(multiplicador)) return 0;
+  return costoConIva * multiplicador;
 }
 
-// 3. Público Tarjeta c/u: precioEfectivo * 1.10
+// 3. Precio Público TC: =FT*10/100+FT
 export function calcularPrecioTarjeta(precioEfectivo: number): number {
-  if (!precioEfectivo || precioEfectivo <= 0) return 0;
-  return Math.round(precioEfectivo * (1 + TARJETA_MARKUP));
+  return precioPublicoTC(precioEfectivo);
 }
 
 // 4. Subtotal Costo SIN IVA: costoSinIva * cantidad (Col 9)

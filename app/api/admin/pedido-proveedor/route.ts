@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { isAdminRequest, isSameOriginJson } from "@/lib/auth";
+import { SKU_PATTERN } from "@/lib/pricing";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 const MAX_PLAN_ITEMS = 500;
@@ -62,7 +63,7 @@ export async function PUT(request: Request) {
     const sku = typeof it?.productSku === "string" ? it.productSku.trim().toUpperCase() : "";
     const quantity = Number(it?.quantity);
     const costo = Number(it?.costoSinIva);
-    if (!/^[A-Z0-9._-]{1,40}$/.test(sku) || !Number.isInteger(quantity) || quantity < 1 || quantity > 10000) {
+    if (!SKU_PATTERN.test(sku) || !Number.isInteger(quantity) || quantity < 1 || quantity > 10000) {
       return NextResponse.json({ error: `Artículo inválido en el pedido (${sku || "sin código"}).` }, { status: 400 });
     }
     bySku.set(sku, {
