@@ -152,3 +152,14 @@ model PecadoPurchasePlanItem {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @default(now()) @updatedAt
 }
+
+// Fotos de productos guardadas en la base (original + versión optimizada para la web)
+model PecadoProductImage {
+  sku       String   @id
+  mime      String
+  data      Bytes
+  original  Bytes?
+  sourceUrl String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+}

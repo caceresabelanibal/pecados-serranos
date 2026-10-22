@@ -62,6 +62,7 @@ import {
   precioPublicoTC,
   proveedorConIva,
 } from "@/lib/pricing";
+import { buildSearchText, matchesSearch as matchesAnyValue } from "@/lib/search";
 import * as XLSX from "xlsx";
 import { VSHOP_CATALOG_DICT } from "@/lib/vshop-catalog-dict";
 import {
@@ -1405,6 +1406,31 @@ export default function PecadosPage() {
     persistAllData(updated, sales, resellers, consignments);
   };
 
+  // Descargar del proveedor las fotos faltantes y guardarlas en la base
+  const [isSyncingImages, setIsSyncingImages] = useState(false);
+  const handleSyncProductImages = async () => {
+    setIsSyncingImages(true);
+    try {
+      const res = await fetch("/api/admin/imagenes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        alert(data?.error || "No se pudieron descargar las fotos.");
+        return;
+      }
+      await fetchServerData();
+      alert(
+        `Fotos guardadas en la base: ${data.saved.length} de ${data.total}.` +
+          (data.missing.length ? `\n\nSin foto en el proveedor: ${data.missing.join(", ")}` : "")
+      );
+    } finally {
+      setIsSyncingImages(false);
+    }
+  };
+
   const openImportModal = () => {
     setImportFile(null);
     setImportRows([]);
@@ -1788,14 +1814,22 @@ export default function PecadosPage() {
     if (onlyShowImported && !recentlyImportedMap[(p.sku || "").toUpperCase()]) {
       return false;
     }
-    const q = stockSearchQuery.trim().toLowerCase();
-    const matchesSearch =
-      !q ||
-      p.title.toLowerCase().includes(q) ||
-      (p.sku && p.sku.toLowerCase().includes(q)) ||
-      (p.tipo && p.tipo.toLowerCase().includes(q)) ||
-      (p.category && p.category.toLowerCase().includes(q)) ||
-      (p.observaciones && p.observaciones.toLowerCase().includes(q));
+    const c = flujoDeCaja(p);
+    const missing = missingFields(p);
+    const matchesSearch = matchesAnyValue(
+      buildSearchText([
+        p.sku,
+        p.title,
+        p.tipo,
+        p.category,
+        p.stock <= 0 ? "sin stock" : "",
+        missing.length ? `incompleto ${missing.join(" ")}` : "completo",
+        p.stock,
+        c.precioPublicoFT,
+        c.precioPublicoTC,
+      ]),
+      stockSearchQuery
+    );
 
     const matchesType =
       stockTypeFilter === "Todos" ||
@@ -2142,6 +2176,15 @@ export default function PecadosPage() {
               </div>
               <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
                 <button
+                  type="button"
+                  onClick={handleSyncProductImages}
+                  disabled={isSyncingImages}
+                  className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60 text-white text-xs font-bold flex items-center gap-1.5 border border-zinc-700 transition-colors cursor-pointer"
+                  title="Descarga del proveedor las fotos que falten y las guarda en la base"
+                >
+                  {isSyncingImages ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Descargar fotos faltantes
+                </button>
+                <button
                   onClick={exportStockCSV}
                   className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-2 shadow-lg transition-colors cursor-pointer"
                 >
@@ -2161,7 +2204,7 @@ export default function PecadosPage() {
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
                 <input
                   type="text"
-                  placeholder="Buscar por código, descripción o tipo..."
+                  placeholder="Buscar por cualquier valor: código, descripción, tipo, cantidad, precio FT o TC, sin stock, incompleto…"
                   value={stockSearchQuery}
                   onChange={(e) => setStockSearchQuery(e.target.value)}
                   className="w-full pl-10 pr-4 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-red-500 transition-colors"
@@ -2217,12 +2260,12 @@ export default function PecadosPage() {
                 <table className="w-full text-left text-xs">
                   <thead className="bg-zinc-950/95 sticky top-0 z-20 border-b border-zinc-800 text-zinc-400 uppercase tracking-wider font-semibold text-[10px]">
                     <tr>
-                      <th className="p-3">Código</th>
-                      <th className="p-3">Artículo</th>
+                      <th className="p-3 text-center">Código</th>
+                      <th className="p-3 text-left">Artículo</th>
                       <th className="p-3 text-center">Cantidad</th>
-                      <th className="p-3 text-right text-emerald-400 whitespace-nowrap">Precio Publico FT</th>
-                      <th className="p-3 text-right text-blue-400 whitespace-nowrap">Precio Publico TC</th>
-                      <th className="p-3 text-right">Acciones</th>
+                      <th className="p-3 text-center text-emerald-400 whitespace-nowrap">Precio Publico FT</th>
+                      <th className="p-3 text-center text-blue-400 whitespace-nowrap">Precio Publico TC</th>
+                      <th className="p-3 text-center">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800/60">
@@ -2240,7 +2283,7 @@ export default function PecadosPage() {
                         const isLow = p.stock > 0 && p.stock <= (p.minStock ?? 2);
                         return (
                           <tr key={p.id} className={missing.length > 0 ? "bg-amber-950/15" : "hover:bg-zinc-800/40"}>
-                            <td className="p-3 font-mono font-bold text-red-400 whitespace-nowrap">{p.sku || "S/C"}</td>
+                            <td className="p-3 text-center font-mono font-bold text-red-400 whitespace-nowrap">{p.sku || "S/C"}</td>
                             <td className="p-3">
                               <div className="flex items-center gap-2 min-w-[200px]">
                                 <div className="relative w-8 h-8 rounded-lg overflow-hidden bg-black shrink-0 border border-zinc-700">
@@ -2288,14 +2331,14 @@ export default function PecadosPage() {
                                 </button>
                               </div>
                             </td>
-                            <td className="p-3 text-right font-mono text-emerald-300 whitespace-nowrap">
+                            <td className="p-3 text-center font-mono text-emerald-300 whitespace-nowrap">
                               {c.precioPublicoFT > 0 ? formatMoney(c.precioPublicoFT) : "—"}
                             </td>
-                            <td className="p-3 text-right font-mono text-blue-300 font-bold whitespace-nowrap">
+                            <td className="p-3 text-center font-mono text-blue-300 font-bold whitespace-nowrap">
                               {c.precioPublicoTC > 0 ? formatMoney(c.precioPublicoTC) : "—"}
                             </td>
-                            <td className="p-3 text-right">
-                              <div className="flex items-center justify-end gap-1">
+                            <td className="p-3 text-center">
+                              <div className="flex items-center justify-center gap-1">
                                 <button
                                   onClick={() => openEditProductModal(p)}
                                   className="p-1.5 rounded-lg hover:bg-zinc-700 text-zinc-400 hover:text-white cursor-pointer"

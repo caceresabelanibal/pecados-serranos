@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 import { AlertTriangle, CheckCircle2, Edit3, FileSpreadsheet, FileUp, Search, Wallet, X } from "lucide-react";
 import type { Product } from "@/app/products";
 import { MULTIPLIER_OPTIONS, flujoDeCaja, formatMoney, missingFields } from "@/lib/pricing";
+import { buildSearchText, matchesSearch } from "@/lib/search";
 
 export type PricingPatch = Partial<Pick<Product, "costoSinIva" | "multiplicadorGanancia" | "stock" | "precioEfectivo">>;
 
@@ -54,7 +55,7 @@ function NumberCell({
         if (e.key === "Enter") (e.target as HTMLInputElement).blur();
         if (e.key === "Escape") setDraft(null);
       }}
-      className={`w-full px-2 py-1 rounded-lg bg-zinc-950 border text-xs text-right font-mono focus:outline-none focus:border-red-500 ${
+      className={`w-full px-2 py-1 rounded-lg bg-zinc-950 border text-xs text-center font-mono focus:outline-none focus:border-red-500 ${
         invalid ? "border-amber-600 text-amber-200" : "border-zinc-800 text-white"
       } ${className}`}
     />
@@ -75,11 +76,33 @@ export default function CashFlowTab({
 
   const rows = useMemo(
     () =>
-      products.map((p) => ({
-        product: p,
-        calc: flujoDeCaja(p),
-        missing: missingFields(p),
-      })),
+      products.map((p) => {
+        const calc = flujoDeCaja(p);
+        const missing = missingFields(p);
+        return {
+          product: p,
+          calc,
+          missing,
+          // Texto con todos los valores de la fila para el buscador
+          searchText: buildSearchText([
+            p.sku,
+            p.title,
+            p.tipo,
+            p.category,
+            missing.length ? `incompleto ${missing.join(" ")}` : "completo",
+            calc.proveedorSinIva,
+            calc.proveedorConIva,
+            calc.multiplicador,
+            calc.ganancia,
+            calc.cantidad,
+            calc.sinIvaPorCantidad,
+            calc.conIvaPorCantidad,
+            calc.gananciaTotal,
+            calc.precioPublicoFT,
+            calc.precioPublicoTC,
+          ]),
+        };
+      }),
     [products]
   );
 
@@ -87,14 +110,7 @@ export default function CashFlowTab({
 
   const visible = rows.filter((r) => {
     if (onlyIncomplete && r.missing.length === 0) return false;
-    const q = query.trim().toLowerCase();
-    if (!q) return true;
-    const p = r.product;
-    return (
-      (p.sku || "").toLowerCase().includes(q) ||
-      p.title.toLowerCase().includes(q) ||
-      (p.tipo || p.category || "").toLowerCase().includes(q)
-    );
+    return matchesSearch(r.searchText, query);
   });
 
   const totals = visible.reduce(
@@ -151,8 +167,8 @@ export default function CashFlowTab({
     XLSX.writeFile(wb, `Flujo_de_caja_Pecados_Serranos_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
-  const th = "p-2.5 text-right whitespace-nowrap";
-  const td = "p-2 text-right font-mono whitespace-nowrap";
+  const th = "p-2.5 text-center whitespace-nowrap";
+  const td = "p-2 text-center font-mono whitespace-nowrap";
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -184,6 +200,28 @@ export default function CashFlowTab({
             <FileSpreadsheet className="w-4 h-4" /> Exportar Excel
           </button>
         </div>
+      </div>
+
+      {/* Buscador: cualquier valor de la fila (código, descripción, tipo, importes, cantidades, multiplicador) */}
+      <div className="p-3 rounded-2xl bg-zinc-900/90 border border-zinc-800 flex items-center gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar por cualquier valor: código, descripción, tipo, importes ($19.175), cantidad, x1.7, incompleto…"
+            className="w-full pl-9 pr-8 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-red-500"
+          />
+          {query && (
+            <button type="button" onClick={() => setQuery("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white cursor-pointer">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+        <span className="text-[11px] text-zinc-400 whitespace-nowrap">
+          {visible.length} de {rows.length}
+        </span>
       </div>
 
       {importSuccessBanner && (
@@ -220,23 +258,13 @@ export default function CashFlowTab({
         </div>
       )}
 
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Buscar por código, descripción o tipo…"
-          className="w-full pl-9 pr-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-red-500"
-        />
-      </div>
 
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 overflow-hidden shadow-2xl">
         <div className="overflow-x-auto max-h-[75vh]">
           <table className="w-full text-xs">
             <thead className="bg-zinc-950/95 sticky top-0 z-20 border-b border-zinc-800 text-zinc-400 uppercase tracking-wider font-semibold text-[10px]">
               <tr>
-                <th className="p-2.5 text-left">Código</th>
+                <th className={th}>Código</th>
                 <th className="p-2.5 text-left min-w-[200px]">Artículo</th>
                 <th className={`${th} min-w-[110px]`}>Proveedor SIN IVA</th>
                 <th className={`${th} text-amber-300`}>Proveedor con IVA</th>
@@ -266,7 +294,7 @@ export default function CashFlowTab({
                       key={p.id}
                       className={missing.length > 0 ? "bg-amber-950/15 hover:bg-amber-950/25" : imported ? "bg-emerald-950/20" : "hover:bg-zinc-800/40"}
                     >
-                      <td className="p-2 font-mono font-bold text-red-400 whitespace-nowrap align-top">
+                      <td className="p-2 text-center font-mono font-bold text-red-400 whitespace-nowrap align-top">
                         {p.sku}
                         {imported && (
                           <span className="block text-[9px] font-sans text-emerald-300">
@@ -298,7 +326,7 @@ export default function CashFlowTab({
                       </td>
                       <td className={`${td} text-amber-300`}>{formatMoney(c.proveedorConIva)}</td>
                       <td className="p-2">
-                        <div className="flex items-center gap-1.5 justify-end">
+                        <div className="flex items-center gap-1.5 justify-center">
                           <select
                             value={c.multiplicador ? String(c.multiplicador) : ""}
                             onChange={(e) => onUpdateProduct(p.id, { multiplicadorGanancia: Number(e.target.value) || 0 })}
@@ -332,7 +360,7 @@ export default function CashFlowTab({
                         />
                       </td>
                       <td className={`${td} text-blue-300 font-bold`}>{formatMoney(c.precioPublicoTC)}</td>
-                      <td className="p-2 text-right">
+                      <td className="p-2 text-center">
                         <button
                           type="button"
                           onClick={() => onEditProduct(p)}
@@ -355,7 +383,7 @@ export default function CashFlowTab({
                 <td className={td}>{formatMoney(totals.sinIva)}</td>
                 <td className={`${td} text-amber-300`}>{formatMoney(totals.conIva)}</td>
                 <td className={`${td} text-rose-300`}>{formatMoney(totals.ganancia)}</td>
-                <td className={`${td} text-center`}>{totals.cantidad}</td>
+                <td className={td}>{totals.cantidad}</td>
                 <td className={td}>{formatMoney(totals.sinIvaC)}</td>
                 <td className={`${td} text-amber-300`}>{formatMoney(totals.conIvaC)}</td>
                 <td className={`${td} text-rose-300`}>{formatMoney(totals.gananciaTotal)}</td>

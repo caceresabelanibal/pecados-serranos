@@ -3,99 +3,79 @@ import { prisma } from "@/lib/prisma";
 import fs from "fs";
 import path from "path";
 import { isAdminRequest, isSameOriginJson } from "@/lib/auth";
+import { SKU_PATTERN } from "@/lib/pricing";
+import { getStoredImage, productImageUrl, resolveProductImage, saveDataUriImage } from "@/lib/product-images";
 
 const ALLOWED_IMAGE = /^data:(image\/(?:png|jpeg|jpg|webp|gif));base64,([A-Za-z0-9+/=]+)$/;
 const MAX_IMAGE_CHARS = 8 * 1024 * 1024; // ~6 MB de imagen
-import { SKU_PATTERN as SKU_RE } from "@/lib/pricing";
+const SUPPLIER_HOST = "resources.sexshopargentino.com.ar";
+
+function imageResponse(data: Buffer, mime: string, cache = "public, max-age=3600, stale-while-revalidate=86400") {
+  return new NextResponse(new Uint8Array(data), {
+    headers: {
+      "Content-Type": mime,
+      "Cache-Control": cache,
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'; sandbox",
+    },
+  });
+}
+
+function isExternalCustomUrl(image: string | null | undefined): boolean {
+  if (!image || !image.startsWith("https://")) return false;
+  try {
+    return new URL(image).host !== SUPPLIER_HOST;
+  } catch {
+    return false;
+  }
+}
 
 // GET /api/pecados/imagen/[sku]
-// Sirve la imagen del producto directamente desde PostgreSQL (Base64, URL o archivo local) usando su SKU
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ sku: string }> }
-) {
+// Foto del producto guardada en PostgreSQL. Si todavía no está, se descarga del proveedor
+// (o se toma el archivo local), se guarda en la base y se sirve.
+export async function GET(_request: NextRequest, { params }: { params: Promise<{ sku: string }> }) {
   const { sku } = await params;
   const cleanSku = decodeURIComponent(sku).trim().toUpperCase();
 
-  // 1. Intentar consultar la imagen almacenada en la base de datos PostgreSQL
-  const hasPostgres = Boolean(
-    process.env.DATABASE_URL &&
-      (process.env.DATABASE_URL.startsWith("postgres://") ||
-        process.env.DATABASE_URL.startsWith("postgresql://"))
-  );
-
-  if (hasPostgres) {
+  if (SKU_PATTERN.test(cleanSku)) {
     try {
-      const product = await prisma.pecadoProduct.findUnique({
-        where: { sku: cleanSku },
-        select: { image: true },
-      });
+      const product = await prisma.pecadoProduct.findUnique({ where: { sku: cleanSku }, select: { image: true } });
 
-      if (product?.image) {
-        // A) Si la imagen está guardada como Data URI Base64 directamente en PostgreSQL
-        if (product.image.startsWith("data:image/")) {
-          const matches = product.image.match(ALLOWED_IMAGE);
-          if (matches) {
-            const mimeType = matches[1];
-            const buffer = Buffer.from(matches[2], "base64");
-            return new NextResponse(buffer, {
-              headers: {
-                "Content-Type": mimeType,
-                "Cache-Control": "public, max-age=86400, stale-while-revalidate=43200",
-                "X-Content-Type-Options": "nosniff",
-                "Content-Security-Policy": "default-src 'none'; sandbox",
-              },
-            });
-          }
-        }
+      // URL externa elegida a mano por el administrador
+      if (isExternalCustomUrl(product?.image)) {
+        return NextResponse.redirect(product!.image as string, { status: 307 });
+      }
 
-        // B) Si la imagen está guardada como URL remota
-        if (product.image.startsWith("https://")) {
-          return NextResponse.redirect(product.image, { status: 307 });
+      const stored = await getStoredImage(cleanSku);
+      if (stored) return imageResponse(stored.data, stored.mime);
+
+      // Imagen antigua guardada como data URI en el producto: se pasa a la tabla de imágenes
+      if (product?.image?.startsWith("data:image/") && ALLOWED_IMAGE.test(product.image)) {
+        if (await saveDataUriImage(cleanSku, product.image)) {
+          await prisma.pecadoProduct.update({ where: { sku: cleanSku }, data: { image: productImageUrl(cleanSku) } });
+          const saved = await getStoredImage(cleanSku);
+          if (saved) return imageResponse(saved.data, saved.mime);
         }
       }
+
+      const resolved = await resolveProductImage(cleanSku);
+      if (resolved) return imageResponse(resolved.data, resolved.mime);
     } catch (err) {
-      console.warn(`[Image API] Error consultando imagen para SKU ${cleanSku} en PostgreSQL:`, err);
+      console.warn(`[Image API] Error obteniendo imagen para SKU ${cleanSku}:`, err);
     }
   }
 
-  // 2. Respaldo: Archivos locales en public/pecados/products/
-  const possibleExtensions = [".jpg", ".png", ".jpeg", ".webp"];
-  for (const ext of SKU_RE.test(cleanSku) ? possibleExtensions : []) {
-    const filePath = path.join(process.cwd(), "public", "pecados", "products", `${cleanSku}${ext}`);
-    if (fs.existsSync(filePath)) {
-      const fileBuffer = fs.readFileSync(filePath);
-      const mime = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
-      return new NextResponse(fileBuffer, {
-        headers: {
-          "Content-Type": mime,
-          "Cache-Control": "public, max-age=86400, stale-while-revalidate=43200",
-        },
-      });
-    }
-  }
-
-  // 3. Fallback genérico: Logo transparente
+  // Sin foto: logo genérico (no se guarda, para reintentar más adelante)
   const fallbackPath = path.join(process.cwd(), "public", "pecados", "logo-transparent.png");
   if (fs.existsSync(fallbackPath)) {
-    const fileBuffer = fs.readFileSync(fallbackPath);
-    return new NextResponse(fileBuffer, {
-      headers: {
-        "Content-Type": "image/png",
-        "Cache-Control": "public, max-age=3600",
-      },
-    });
+    return imageResponse(fs.readFileSync(fallbackPath), "image/png", "public, max-age=600");
   }
-
   return new NextResponse("Imagen no encontrada", { status: 404 });
 }
 
-// POST /api/pecados/imagen/[sku]
-// Guarda o actualiza la imagen directamente en la base de datos PostgreSQL para el SKU indicado
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ sku: string }> }
-) {
+// POST /api/pecados/imagen/[sku]  { image }
+// Admin: guarda la foto subida (data URI) en la base, o una URL https externa.
+export async function POST(request: NextRequest, { params }: { params: Promise<{ sku: string }> }) {
   try {
     if (!isAdminRequest(request)) {
       return NextResponse.json({ error: "No autorizado." }, { status: 401 });
@@ -106,43 +86,28 @@ export async function POST(
 
     const { sku } = await params;
     const cleanSku = decodeURIComponent(sku).trim().toUpperCase();
-    const body = await request.json();
-    const { image } = body;
+    const { image } = await request.json();
 
     const validImage =
       typeof image === "string" &&
       image.length <= MAX_IMAGE_CHARS &&
       (ALLOWED_IMAGE.test(image) || /^https:\/\/[^\s"'<>]+$/.test(image));
-    if (!validImage) {
+    if (!SKU_PATTERN.test(cleanSku) || !validImage) {
       return NextResponse.json(
         { error: "Imagen inválida: sólo PNG, JPEG, WEBP o GIF (máx. 6 MB) o una URL https." },
         { status: 400 }
       );
     }
 
-    const hasPostgres = Boolean(
-      process.env.DATABASE_URL &&
-        (process.env.DATABASE_URL.startsWith("postgres://") ||
-          process.env.DATABASE_URL.startsWith("postgresql://"))
-    );
-
-    if (hasPostgres) {
-      await prisma.pecadoProduct.update({
-        where: { sku: cleanSku },
-        data: { image },
-      });
-      return NextResponse.json({
-        success: true,
-        sku: cleanSku,
-        message: "Imagen guardada exitosamente en la base de datos PostgreSQL.",
-      });
+    if (image.startsWith("data:")) {
+      if (!(await saveDataUriImage(cleanSku, image))) {
+        return NextResponse.json({ error: "No se pudo procesar la imagen." }, { status: 400 });
+      }
+      await prisma.pecadoProduct.update({ where: { sku: cleanSku }, data: { image: productImageUrl(cleanSku) } });
+    } else {
+      await prisma.pecadoProduct.update({ where: { sku: cleanSku }, data: { image } });
     }
-
-    return NextResponse.json({
-      success: true,
-      sku: cleanSku,
-      warning: "DATABASE_URL no configurada; la imagen fue recibida pero requiere PostgreSQL conectada para persistir en DB.",
-    });
+    return NextResponse.json({ success: true, sku: cleanSku, message: "Imagen guardada en la base de datos." });
   } catch (error) {
     console.error("[Image API] Error guardando imagen en base de datos:", error);
     return NextResponse.json({ error: "Error al guardar imagen en la base de datos." }, { status: 500 });

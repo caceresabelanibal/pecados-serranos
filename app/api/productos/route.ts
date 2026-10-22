@@ -4,6 +4,7 @@ import type { Product, Sale, Reseller, Consignment, PurchaseRecord } from "@/app
 import { INITIAL_PRODUCTS, INITIAL_RESELLERS, INITIAL_PURCHASES } from "@/lib/initial-data";
 import { isAdminRequest, isSameOriginJson } from "@/lib/auth";
 import { isProductComplete, isValidMultiplier, precioPublicoTC, proveedorConIva } from "@/lib/pricing";
+import { productImageUrl, saveDataUriImage } from "@/lib/product-images";
 
 // Valores de precio normalizados con las fórmulas del flujo de caja (el servidor es la fuente de verdad)
 function normalizePricing(p: any) {
@@ -583,6 +584,12 @@ export async function POST(request: Request) {
           for (const p of products) {
             const cleanSku = p.sku ? p.sku.trim().toUpperCase() : `PEC-${Date.now().toString().slice(-4)}`;
             const pricing = normalizePricing(p);
+            // Fotos subidas desde el panel (data URI) se guardan en la tabla de imágenes
+            let image = typeof p.image === "string" ? p.image : "";
+            if (image.startsWith("data:image/") && (await saveDataUriImage(cleanSku, image))) {
+              image = productImageUrl(cleanSku);
+            }
+            if (!image || image.includes("auriculares")) image = productImageUrl(cleanSku);
             await prisma.pecadoProduct.upsert({
               where: { sku: cleanSku },
               update: {
@@ -595,7 +602,7 @@ export async function POST(request: Request) {
                 stock: p.stock ?? 0,
                 minStock: p.minStock ?? 2,
                 observaciones: p.observaciones || "",
-                image: p.image || "/pecados/auriculares.jpg",
+                image,
                 active: true,
               },
               create: {
@@ -609,7 +616,7 @@ export async function POST(request: Request) {
                 stock: p.stock ?? 0,
                 minStock: p.minStock ?? 2,
                 observaciones: p.observaciones || "",
-                image: p.image || "/pecados/auriculares.jpg",
+                image,
                 active: true,
               },
             });
