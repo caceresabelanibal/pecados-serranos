@@ -163,7 +163,7 @@ export default function AgeGate() {
                   transition={{ delay: 0.5 }}
                   className="mt-4 text-sm text-zinc-300 leading-relaxed"
                 >
-                  [Texto del aviso — a completar por la tienda]
+                  Este sitio web contiene material restringido a menores de edad, que incluye desnudez y objetos explícitos utilizados y/o comercializados para actividad sexual. Al entrar, afirma que tiene por lo menos 18 años de edad o la mayoría de edad en la jurisdicción desde que está accediendo el sitio web y que da consentimiento en ver contenido sexualmente explícito.
                 </motion.p>
 
                 <motion.div
