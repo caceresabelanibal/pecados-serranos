@@ -39,6 +39,9 @@ model PecadoReseller {
   phone             String   @default("")
   zone              String   @default("")
   commissionPercent Float    @default(15)
+  // Comisión: "percent" (porcentaje de lo vendido) o "fixed" (monto fijo por unidad vendida)
+  commissionType    String   @default("percent")
+  commissionFixed   Float    @default(0)
   notes             String   @default("")
   // Código propio que comparte con sus compradores (ej: MARU10)
   code              String?  @unique

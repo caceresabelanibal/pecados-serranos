@@ -73,6 +73,8 @@ export interface Reseller {
   phone: string;
   zone: string; // Zona / Localidad (ej: Punilla, Carlos Paz, Córdoba Capital)
   commissionPercent: number; // Porcentaje de comisión (%)
+  commissionType?: "percent" | "fixed"; // Porcentaje de lo vendido o monto fijo por unidad
+  commissionFixed?: number; // Monto fijo por unidad vendida ($)
   notes?: string;
   createdAt: string;
   code?: string; // Código propio que comparte con sus compradores
@@ -274,6 +276,27 @@ export interface PurchasePlanItem {
   costoSinIva: number;
   image: string;
   fromInterest: boolean;
+}
+
+// Comisión del revendedor: porcentaje de lo vendido o monto fijo por unidad vendida
+export function resellerCommission(
+  r: Pick<Reseller, "commissionPercent" | "commissionType" | "commissionFixed"> | undefined | null,
+  units: number,
+  gross: number
+): number {
+  if (!r) return 0;
+  if (r.commissionType === "fixed") return Math.round((r.commissionFixed || 0) * units * 100) / 100;
+  return Math.round(gross * ((r.commissionPercent || 0) / 100) * 100) / 100;
+}
+
+export function resellerCommissionLabel(
+  r: Pick<Reseller, "commissionPercent" | "commissionType" | "commissionFixed"> | undefined | null
+): string {
+  if (!r) return "";
+  if (r.commissionType === "fixed") {
+    return `$${(r.commissionFixed || 0).toLocaleString("es-AR", { maximumFractionDigits: 2 })} por unidad`;
+  }
+  return `${r.commissionPercent || 0}%`;
 }
 
 // Medios de pago de ventas y rendiciones

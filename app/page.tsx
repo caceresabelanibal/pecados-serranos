@@ -98,6 +98,8 @@ import {
   PAYMENT_METHOD_LABELS,
   isCashPriceMethod,
   type PaymentMethod,
+  resellerCommission,
+  resellerCommissionLabel,
 } from "./products";
 
 export default function PecadosPage() {
@@ -196,6 +198,8 @@ export default function PecadosPage() {
     phone: "",
     zone: "",
     commissionPercent: 15,
+    commissionType: "percent" as "percent" | "fixed",
+    commissionFixed: 0,
     notes: "",
     code: "",
     username: "",
@@ -1558,6 +1562,8 @@ export default function PecadosPage() {
       phone: "",
       zone: "",
       commissionPercent: 15,
+      commissionType: "percent" as "percent" | "fixed",
+      commissionFixed: 0,
       notes: "",
       code: "",
       username: "",
@@ -1583,6 +1589,8 @@ export default function PecadosPage() {
               phone: resellerForm.phone.replace(/[^0-9]/g, ""),
               zone: resellerForm.zone.trim(),
               commissionPercent: Number(resellerForm.commissionPercent) || 0,
+              commissionType: resellerForm.commissionType,
+              commissionFixed: Number(resellerForm.commissionFixed) || 0,
               notes: resellerForm.notes.trim(),
             }
           : r
@@ -1595,6 +1603,8 @@ export default function PecadosPage() {
         phone: resellerForm.phone.replace(/[^0-9]/g, ""),
         zone: resellerForm.zone.trim() || "Local",
         commissionPercent: Number(resellerForm.commissionPercent) || 0,
+        commissionType: resellerForm.commissionType,
+        commissionFixed: Number(resellerForm.commissionFixed) || 0,
         notes: resellerForm.notes.trim(),
         createdAt: new Date().toISOString(),
       };
@@ -1715,8 +1725,7 @@ export default function PecadosPage() {
     if (sold > 0) {
       const reseller = resellers.find((r) => r.id === settlingConsignment.resellerId);
       const subtotal = sold * settlingConsignment.unitAgreedPrice;
-      const commissionRate = reseller ? reseller.commissionPercent / 100 : 0;
-      const commissionAmount = subtotal * commissionRate;
+      const commissionAmount = resellerCommission(reseller, sold, subtotal);
       const netToCollect = subtotal - commissionAmount;
 
       const newSale: Sale = {
@@ -1739,7 +1748,7 @@ export default function PecadosPage() {
         totalAmount: subtotal,
         paymentMethod: settleForm.paymentMethod,
         status: "completed",
-        notes: `Rendición de lote. Comisión revendedor: $${commissionAmount.toLocaleString("es-AR")} (${reseller?.commissionPercent}%). Neto cobrado: $${netToCollect.toLocaleString("es-AR")}.`,
+        notes: `Rendición de lote. Comisión revendedor: $${commissionAmount.toLocaleString("es-AR")} (${resellerCommissionLabel(reseller)}). Neto cobrado: $${netToCollect.toLocaleString("es-AR")}.`,
       };
       updatedSales = [newSale, ...sales];
     }
@@ -3095,7 +3104,7 @@ export default function PecadosPage() {
                   (sum, c) => sum + c.quantitySold * c.unitAgreedPrice,
                   0
                 );
-                const totalCommissionEarned = totalRevenueSold * (r.commissionPercent / 100);
+                const totalCommissionEarned = resellerCommission(r, totalUnitsSold, totalRevenueSold);
 
                 return (
                   <div
@@ -3105,7 +3114,7 @@ export default function PecadosPage() {
                     <div>
                       <div className="flex items-center justify-between gap-2">
                         <span className="px-2.5 py-0.5 rounded-full bg-red-950 text-red-300 border border-red-800 text-[10px] font-bold">
-                          Comisión: {r.commissionPercent}%
+                          Comisión: {resellerCommissionLabel(r)}
                         </span>
                         {r.code && (
                           <span className="px-2 py-0.5 rounded-full bg-zinc-950 text-amber-300 border border-amber-800 text-[10px] font-bold font-mono">
@@ -3126,6 +3135,8 @@ export default function PecadosPage() {
                                 phone: r.phone,
                                 zone: r.zone,
                                 commissionPercent: r.commissionPercent,
+                                commissionType: r.commissionType === "fixed" ? "fixed" : "percent",
+                                commissionFixed: r.commissionFixed || 0,
                                 notes: r.notes || "",
                                 code: r.code || "",
                                 username: r.username || "",
@@ -5072,15 +5083,43 @@ export default function PecadosPage() {
                     />
                   </div>
                   <div>
-                    <label className="text-zinc-400 font-medium block mb-1">Comisión (%)</label>
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={resellerForm.commissionPercent}
-                      onChange={(e) => setResellerForm({ ...resellerForm, commissionPercent: Number(e.target.value) })}
-                      className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white font-mono"
-                    />
+                    <label className="text-zinc-400 font-medium block mb-1">Comisión</label>
+                    <div className="flex gap-1.5">
+                      <select
+                        value={resellerForm.commissionType}
+                        onChange={(e) => setResellerForm({ ...resellerForm, commissionType: e.target.value as "percent" | "fixed" })}
+                        className="w-[88px] shrink-0 px-2 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white"
+                        title="Tipo de comisión"
+                      >
+                        <option value="percent">%</option>
+                        <option value="fixed">$ fijo</option>
+                      </select>
+                      {resellerForm.commissionType === "fixed" ? (
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={resellerForm.commissionFixed}
+                          onChange={(e) => setResellerForm({ ...resellerForm, commissionFixed: Math.max(0, Number(e.target.value) || 0) })}
+                          className="w-full min-w-0 px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white font-mono"
+                          title="Monto fijo por unidad vendida"
+                        />
+                      ) : (
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step="0.1"
+                          value={resellerForm.commissionPercent}
+                          onChange={(e) => setResellerForm({ ...resellerForm, commissionPercent: Math.min(100, Math.max(0, Number(e.target.value) || 0)) })}
+                          className="w-full min-w-0 px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white font-mono"
+                          title="Porcentaje sobre lo vendido"
+                        />
+                      )}
+                    </div>
+                    <span className="mt-1 block text-[10px] text-zinc-500">
+                      {resellerForm.commissionType === "fixed" ? "Monto fijo por cada unidad vendida" : "Porcentaje sobre el total vendido"}
+                    </span>
                   </div>
                 </div>
 
@@ -5383,7 +5422,7 @@ export default function PecadosPage() {
                     {(() => {
                       const res = resellers.find((r) => r.id === settlingConsignment.resellerId);
                       const gross = settleForm.quantitySold * settlingConsignment.unitAgreedPrice;
-                      const comm = gross * ((res?.commissionPercent || 0) / 100);
+                      const comm = resellerCommission(res, settleForm.quantitySold, gross);
                       const net = gross - comm;
                       return (
                         <>
@@ -5392,7 +5431,7 @@ export default function PecadosPage() {
                             <strong className="font-mono">${gross.toLocaleString("es-AR")}</strong>
                           </div>
                           <div className="flex justify-between text-amber-300">
-                            <span>Comisión Revendedor ({res?.commissionPercent}%):</span>
+                            <span>Comisión Revendedor ({resellerCommissionLabel(res)}):</span>
                             <strong className="font-mono">-${comm.toLocaleString("es-AR")}</strong>
                           </div>
                           <div className="flex justify-between text-emerald-400 font-bold pt-1 border-t border-emerald-800/40">

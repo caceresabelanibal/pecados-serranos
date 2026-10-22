@@ -362,6 +362,8 @@ async function getFullState() {
         phone: r.phone,
         zone: r.zone,
         commissionPercent: r.commissionPercent,
+        commissionType: r.commissionType === "fixed" ? "fixed" : "percent",
+        commissionFixed: r.commissionFixed,
         notes: r.notes,
         createdAt: r.createdAt.toISOString(),
         // Acceso al perfil Asociado (la contraseña nunca sale del servidor)
@@ -653,7 +655,9 @@ export async function POST(request: Request) {
                 name: r.name,
                 phone: r.phone || "",
                 zone: r.zone || "",
-                commissionPercent: r.commissionPercent || 15,
+                commissionPercent: Math.min(100, Math.max(0, Number(r.commissionPercent ?? 15) || 0)),
+                commissionType: r.commissionType === "fixed" ? "fixed" : "percent",
+                commissionFixed: Math.max(0, Number(r.commissionFixed) || 0),
                 notes: r.notes || "",
               },
               create: {
@@ -661,7 +665,9 @@ export async function POST(request: Request) {
                 name: r.name,
                 phone: r.phone || "",
                 zone: r.zone || "",
-                commissionPercent: r.commissionPercent || 15,
+                commissionPercent: Math.min(100, Math.max(0, Number(r.commissionPercent ?? 15) || 0)),
+                commissionType: r.commissionType === "fixed" ? "fixed" : "percent",
+                commissionFixed: Math.max(0, Number(r.commissionFixed) || 0),
                 notes: r.notes || "",
               },
             });
