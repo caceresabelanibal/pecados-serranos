@@ -49,6 +49,8 @@ export interface SaleItem {
   subtotal: number;
   unitCost?: number;
   paymentMethodUsed?: "efectivo" | "tarjeta";
+  commissionUnit?: number | null; // Comisión de la revendedora por unidad (null = sin definir)
+  commission?: number; // Comisión total del ítem
 }
 
 export interface Sale {
@@ -65,6 +67,8 @@ export interface Sale {
   status: "completed" | "pending" | "cancelled";
   notes?: string;
   resellerCode?: string; // Código de revendedora usado en la compra
+  commissionTotal?: number; // Comisión total de la revendedora en esta venta
+  commissionPending?: boolean; // Algún artículo sin comisión definida
 }
 
 export interface Reseller {
@@ -92,6 +96,7 @@ export interface Consignment {
   productTitle: string;
   quantityGiven: number; // Cantidad entregada para revender
   unitAgreedPrice: number; // Precio acordado por unidad
+  commissionPerUnit?: number | null; // Comisión de la revendedora por unidad vendida de este lote
   quantitySold: number; // Cantidad vendida
   quantityReturned: number; // Cantidad devuelta
   status: "active" | "settled"; // En consignación / Liquidada
@@ -276,27 +281,6 @@ export interface PurchasePlanItem {
   costoSinIva: number;
   image: string;
   fromInterest: boolean;
-}
-
-// Comisión del revendedor: porcentaje de lo vendido o monto fijo por unidad vendida
-export function resellerCommission(
-  r: Pick<Reseller, "commissionPercent" | "commissionType" | "commissionFixed"> | undefined | null,
-  units: number,
-  gross: number
-): number {
-  if (!r) return 0;
-  if (r.commissionType === "fixed") return Math.round((r.commissionFixed || 0) * units * 100) / 100;
-  return Math.round(gross * ((r.commissionPercent || 0) / 100) * 100) / 100;
-}
-
-export function resellerCommissionLabel(
-  r: Pick<Reseller, "commissionPercent" | "commissionType" | "commissionFixed"> | undefined | null
-): string {
-  if (!r) return "";
-  if (r.commissionType === "fixed") {
-    return `$${(r.commissionFixed || 0).toLocaleString("es-AR", { maximumFractionDigits: 2 })} por unidad`;
-  }
-  return `${r.commissionPercent || 0}%`;
 }
 
 // Medios de pago de ventas y rendiciones

@@ -67,6 +67,9 @@ model PecadoSale {
   notes         String           @default("")
   // Código de revendedora usado en la compra (si hubo)
   resellerCode  String?
+  // Comisión total de la revendedora en esta venta; pending = algún artículo sin comisión definida
+  commissionTotal   Float   @default(0)
+  commissionPending Boolean @default(false)
   createdAt     DateTime         @default(now())
   items         PecadoSaleItem[]
 
@@ -83,6 +86,9 @@ model PecadoSaleItem {
   quantity     Int        @default(1)
   unitPrice    Float      @default(0)
   subtotal     Float      @default(0)
+  // Comisión de la revendedora por unidad (null = sin comisión definida) y total del ítem
+  commissionUnit Float?
+  commission     Float     @default(0)
 
   @@index([saleId])
 }
@@ -97,6 +103,8 @@ model PecadoConsignment {
   productTitle     String
   quantityGiven    Int      @default(0)
   unitAgreedPrice  Float    @default(0)
+  // Comisión de la revendedora por unidad vendida de este lote (la carga el admin al entregar)
+  commissionPerUnit Float?
   quantitySold     Int      @default(0)
   quantityReturned Int      @default(0)
   status           String   @default("active")

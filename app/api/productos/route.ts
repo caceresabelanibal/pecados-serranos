@@ -5,6 +5,7 @@ import { INITIAL_PRODUCTS, INITIAL_RESELLERS, INITIAL_PURCHASES } from "@/lib/in
 import { isAdminRequest, isSameOriginJson } from "@/lib/auth";
 import { isProductComplete, isValidMultiplier, precioPublicoTC, proveedorConIva } from "@/lib/pricing";
 import { productImageUrl, saveDataUriImage } from "@/lib/product-images";
+import { commissionTotals, commissionUnitFor, withCommission } from "@/lib/commission";
 
 // Valores de precio normalizados con las fórmulas del flujo de caja (el servidor es la fuente de verdad)
 function normalizePricing(p: any) {
@@ -177,6 +178,11 @@ async function ensureTablesExist() {
 }
 
 const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate" };
+
+// Comisión por unidad informada (monto fijo >= 0)
+function validCommission(v: unknown): boolean {
+  return v !== null && v !== undefined && v !== "" && Number.isFinite(Number(v)) && Number(v) >= 0;
+}
 
 // Campos de producto visibles para el público (sin costos, márgenes ni notas internas)
 function toPublicProduct(p: Product) {
@@ -385,6 +391,8 @@ async function getFullState() {
         status: s.status as any,
         notes: s.notes,
         resellerCode: s.resellerCode || undefined,
+        commissionTotal: s.commissionTotal,
+        commissionPending: s.commissionPending,
         items: s.items.map((i) => ({
           productId: i.productId || "",
           productSku: i.productSku,
@@ -392,6 +400,8 @@ async function getFullState() {
           quantity: i.quantity,
           unitPrice: i.unitPrice,
           subtotal: i.subtotal,
+          commissionUnit: i.commissionUnit,
+          commission: i.commission,
         })),
       }));
 
@@ -405,6 +415,7 @@ async function getFullState() {
         productTitle: c.productTitle,
         quantityGiven: c.quantityGiven,
         unitAgreedPrice: c.unitAgreedPrice,
+        commissionPerUnit: c.commissionPerUnit,
         quantitySold: c.quantitySold,
         quantityReturned: c.quantityReturned,
         status: c.status as any,
@@ -693,6 +704,8 @@ export async function POST(request: Request) {
                 quantityReturned: returned,
                 status: sold + returned >= given ? "settled" : "active",
                 notes: c.notes || "",
+                // Comisión por unidad del lote (la define el admin; sólo se actualiza si viene informada)
+                ...(validCommission(c.commissionPerUnit) ? { commissionPerUnit: Number(c.commissionPerUnit) } : {}),
               },
               create: {
                 id: c.id,
@@ -703,6 +716,7 @@ export async function POST(request: Request) {
                 productTitle: c.productTitle,
                 quantityGiven: c.quantityGiven || 0,
                 unitAgreedPrice: c.unitAgreedPrice || 0,
+                commissionPerUnit: validCommission(c.commissionPerUnit) ? Number(c.commissionPerUnit) : null,
                 quantitySold: c.quantitySold || 0,
                 quantityReturned: c.quantityReturned || 0,
                 status: c.status || "active",
@@ -717,6 +731,24 @@ export async function POST(request: Request) {
           for (const s of sales) {
             const existing = await prisma.pecadoSale.findUnique({ where: { id: s.id } });
             if (!existing) {
+              const baseItems = (s.items || []).map((i: any) => ({
+                productId: i.productId || null,
+                productSku: i.productSku || "S/C",
+                productTitle: i.productTitle,
+                quantity: i.quantity,
+                unitPrice: i.unitPrice,
+                subtotal: i.subtotal,
+                commissionUnit: validCommission(i.commissionUnit) ? Number(i.commissionUnit) : undefined,
+              }));
+              // Ventas de revendedora: comisión por ítem (la del lote si viene informada; si no, la asignada al artículo)
+              const items = s.resellerId
+                ? await Promise.all(
+                    baseItems.map(async (i: any) =>
+                      withCommission(i, i.commissionUnit !== undefined ? i.commissionUnit : await commissionUnitFor(prisma, s.resellerId, i.productId))
+                    )
+                  )
+                : baseItems.map((i: any) => ({ ...i, commissionUnit: null, commission: 0 }));
+              const commission = s.resellerId ? commissionTotals(items) : { commissionTotal: 0, commissionPending: false };
               await prisma.pecadoSale.create({
                 data: {
                   id: s.id,
@@ -730,16 +762,8 @@ export async function POST(request: Request) {
                   paymentMethod: s.paymentMethod || "efectivo",
                   status: s.status || "completed",
                   notes: s.notes || "",
-                  items: {
-                    create: (s.items || []).map((i: any) => ({
-                      productId: i.productId || null,
-                      productSku: i.productSku || "S/C",
-                      productTitle: i.productTitle,
-                      quantity: i.quantity,
-                      unitPrice: i.unitPrice,
-                      subtotal: i.subtotal,
-                    })),
-                  },
+                  ...commission,
+                  items: { create: items },
                 },
               });
             }

@@ -24,6 +24,7 @@ interface AsociadoConsignment {
   quantityReturned: number;
   pending: number;
   unitAgreedPrice: number;
+  commissionPerUnit: number | null;
   status: string;
   notes: string;
 }
@@ -36,7 +37,9 @@ interface AsociadoSale {
   paymentMethod: string;
   resellerCode?: string | null;
   notes?: string;
-  items: { productTitle: string; quantity: number; unitPrice: number; subtotal: number }[];
+  commissionTotal?: number;
+  commissionPending?: boolean;
+  items: { productTitle: string; quantity: number; unitPrice: number; subtotal: number; commission?: number }[];
 }
 interface AsociadoData {
   reseller: { id: string; name: string; zone: string; code: string | null };
@@ -52,6 +55,7 @@ interface SaleOption {
   available: number;
   unit: (m: PaymentMethod) => number;
   list: number;
+  commission: number | null; // comisión por unidad (null = sin definir)
 }
 
 interface Props {
@@ -112,6 +116,7 @@ export default function AsociadoPanel({ onLogout }: Props) {
           available: c.pending,
           unit: () => c.unitAgreedPrice,
           list: c.unitAgreedPrice,
+          commission: c.commissionPerUnit,
         })),
     [data]
   );
@@ -123,6 +128,9 @@ export default function AsociadoPanel({ onLogout }: Props) {
         available: p.stock,
         unit: (m: PaymentMethod) => (isCashPriceMethod(m) ? p.precioFT : p.precioTC),
         list: p.precioTC,
+        // Del depósito: la comisión asignada para ese artículo en su último lote
+        commission:
+          (data?.consignments || []).find((c) => c.productId === p.id && c.commissionPerUnit !== null)?.commissionPerUnit ?? null,
       })),
     [data]
   );
@@ -144,6 +152,8 @@ export default function AsociadoPanel({ onLogout }: Props) {
 
   const listTotal = form.items.reduce((t, i) => t + (optionByKey.get(i.key)?.list || 0) * i.quantity, 0);
   const total = form.items.reduce((t, i) => t + (optionByKey.get(i.key)?.unit(form.paymentMethod) || 0) * i.quantity, 0);
+  const myCommission = form.items.reduce((t, i) => t + (optionByKey.get(i.key)?.commission || 0) * i.quantity, 0);
+  const commissionUndefined = form.items.some((i) => optionByKey.get(i.key)?.commission === null);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -191,11 +201,12 @@ export default function AsociadoPanel({ onLogout }: Props) {
   const unidades = sales.reduce((t, s) => t + s.items.reduce((u, i) => u + i.quantity, 0), 0);
   const enMano = consignments.reduce((t, c) => t + c.pending, 0);
   const valorEnMano = consignments.reduce((t, c) => t + c.pending * c.unitAgreedPrice, 0);
+  const comisionGanada = sales.reduce((t, s) => t + (s.commissionTotal || 0), 0);
   const activas = consignments.filter((c) => c.pending > 0);
   const cerradas = consignments.filter((c) => c.pending <= 0);
 
   const kpi = (items: [string, string, string][]) => (
-    <div className="grid grid-cols-3 gap-2 sm:gap-4">
+    <div className={`grid gap-2 sm:gap-4 ${items.length === 4 ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"}`}>
       {items.map(([label, value, color]) => (
         <div key={label} className="p-3 sm:p-4 rounded-2xl bg-zinc-900/80 border border-zinc-800">
           <span className="block text-[10px] sm:text-[11px] uppercase font-semibold text-zinc-400 leading-tight">{label}</span>
@@ -228,6 +239,15 @@ export default function AsociadoPanel({ onLogout }: Props) {
           <span className="block text-[11px] text-zinc-400 mt-0.5">Entregada el {fmtDate(c.date, false)}</span>
           <span className="block text-xs text-white mt-1">
             Precio de venta: <strong className="font-mono">{formatMoney(c.unitAgreedPrice)}</strong> c/u
+          </span>
+          <span className="block text-xs mt-0.5">
+            {c.commissionPerUnit === null ? (
+              <span className="text-amber-300 font-semibold">Comisión a definir por la tienda</span>
+            ) : (
+              <span className="text-amber-300">
+                Tu comisión: <strong className="font-mono">{formatMoney(c.commissionPerUnit)}</strong> por unidad
+              </span>
+            )}
           </span>
         </div>
       </div>
@@ -342,6 +362,7 @@ export default function AsociadoPanel({ onLogout }: Props) {
               ["Ventas", String(sales.length), "text-white"],
               ["Unidades", String(unidades), "text-amber-300"],
               ["Total vendido", formatMoney(totalVendido), "text-emerald-400"],
+              ["Mi comisión", formatMoney(comisionGanada), "text-amber-300"],
             ])}
             {sales.length === 0 ? (
               <div className="p-8 rounded-2xl bg-zinc-900/60 border border-zinc-800 text-center text-sm text-zinc-400">
@@ -367,7 +388,13 @@ export default function AsociadoPanel({ onLogout }: Props) {
                           </span>
                         )}
                       </div>
-                      <span className="text-lg font-black font-mono text-emerald-400">{formatMoney(s.totalAmount)}</span>
+                      <div className="text-right">
+                        <span className="block text-lg font-black font-mono text-emerald-400">{formatMoney(s.totalAmount)}</span>
+                        <span className={`block text-[11px] font-semibold ${s.commissionPending ? "text-amber-300" : "text-amber-200/80"}`}>
+                          Tu comisión: {formatMoney(s.commissionTotal || 0)}
+                          {s.commissionPending ? " (parte a definir)" : ""}
+                        </span>
+                      </div>
                     </div>
                     <ul className="mt-2 space-y-0.5">
                       {s.items.map((i, idx) => (
@@ -553,6 +580,12 @@ export default function AsociadoPanel({ onLogout }: Props) {
                             <p className="col-span-3 sm:col-span-4 text-[10px] text-zinc-500">
                               {item.key.startsWith("c:") ? "De tu mercadería · en mano" : "Del depósito · stock disponible"}: {o.available} · Subtotal:{" "}
                               <span className="text-zinc-300 font-mono">{formatMoney(unit * item.quantity)}</span>
+                              {" · "}
+                              {o.commission === null ? (
+                                <span className="text-amber-300">comisión a definir</span>
+                              ) : (
+                                <span className="text-amber-300">tu comisión {formatMoney(o.commission)} c/u</span>
+                              )}
                             </p>
                           )}
                         </div>
@@ -587,6 +620,10 @@ export default function AsociadoPanel({ onLogout }: Props) {
                     <div className="flex justify-between text-white font-bold text-sm pt-1 border-t border-zinc-800">
                       <span>Total</span>
                       <span className="font-mono">{formatMoney(total)}</span>
+                    </div>
+                    <div className="flex justify-between text-amber-300 font-semibold">
+                      <span>Tu comisión{commissionUndefined ? " (parte a definir)" : ""}</span>
+                      <span className="font-mono">{formatMoney(myCommission)}</span>
                     </div>
                   </div>
                 )}

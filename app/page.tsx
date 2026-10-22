@@ -98,8 +98,6 @@ import {
   PAYMENT_METHOD_LABELS,
   isCashPriceMethod,
   type PaymentMethod,
-  resellerCommission,
-  resellerCommissionLabel,
 } from "./products";
 
 export default function PecadosPage() {
@@ -208,12 +206,18 @@ export default function PecadosPage() {
 
   // Consignment Modal (Entregar mercadería para revender)
   const [showConsignmentModal, setShowConsignmentModal] = useState(false);
-  const [consignmentForm, setConsignmentForm] = useState({
+  // Entrega de mercadería: varias filas (artículo, cantidad, precio de venta y comisión por unidad)
+  type ConsignmentRow = { productId: string; quantity: number; unitAgreedPrice: number; commissionPerUnit: string };
+  const [consignmentForm, setConsignmentForm] = useState<{ resellerId: string; notes: string; items: ConsignmentRow[] }>({
     resellerId: "",
-    productId: "",
-    quantityGiven: 10,
-    unitAgreedPrice: 0,
     notes: "",
+    items: [],
+  });
+  const newConsignmentRow = (p?: Product): ConsignmentRow => ({
+    productId: p?.id || "",
+    quantity: 1,
+    unitAgreedPrice: p?.precioEfectivo || p?.price || 0,
+    commissionPerUnit: "",
   });
 
   // Settle Consignment Modal (Rendir mercadería)
@@ -1657,48 +1661,82 @@ export default function PecadosPage() {
   const handleSaveConsignment = (e: React.FormEvent) => {
     e.preventDefault();
     const reseller = resellers.find((r) => r.id === consignmentForm.resellerId);
-    const product = products.find((p) => p.id === consignmentForm.productId);
-
-    if (!reseller || !product) {
-      alert("Seleccioná un revendedor y un producto.");
+    if (!reseller) {
+      alert("Seleccioná una revendedora.");
+      return;
+    }
+    if (consignmentForm.items.length === 0) {
+      alert("Agregá al menos un artículo.");
       return;
     }
 
-    const qty = Number(consignmentForm.quantityGiven) || 0;
-    if (qty <= 0) {
-      alert("La cantidad entregada debe ser mayor a 0.");
-      return;
+    // Validaciones: cantidad, comisión obligatoria por artículo y stock del depósito
+    const qtyByProduct = new Map<string, number>();
+    for (const row of consignmentForm.items) {
+      const product = products.find((p) => p.id === row.productId);
+      if (!product) {
+        alert("Seleccioná el artículo en todas las filas.");
+        return;
+      }
+      if (!(Number(row.quantity) > 0)) {
+        alert(`Indicá la cantidad a entregar de "${product.title}".`);
+        return;
+      }
+      if (row.commissionPerUnit.trim() === "" || !(Number(row.commissionPerUnit) >= 0)) {
+        alert(`Falta la comisión por unidad de "${product.title}". Es obligatoria.`);
+        return;
+      }
+      qtyByProduct.set(product.id, (qtyByProduct.get(product.id) || 0) + Number(row.quantity));
+    }
+    for (const [productId, qty] of qtyByProduct) {
+      const product = products.find((p) => p.id === productId)!;
+      if (qty > product.stock) {
+        alert(`No hay stock suficiente de "${product.title}" en depósito. Disponible: ${product.stock} un.`);
+        return;
+      }
     }
 
-    if (qty > product.stock) {
-      alert(`No hay stock suficiente en depósito. Stock disponible: ${product.stock} un.`);
-      return;
-    }
+    // Descontar del depósito y crear un lote por artículo
+    const updatedProducts = products.map((p) => (qtyByProduct.has(p.id) ? { ...p, stock: p.stock - qtyByProduct.get(p.id)! } : p));
+    const now = Date.now();
+    const newConsignments: Consignment[] = consignmentForm.items.map((row, idx) => {
+      const product = products.find((p) => p.id === row.productId)!;
+      return {
+        id: `cons-${now}-${idx}`,
+        resellerId: reseller.id,
+        resellerName: reseller.name,
+        date: new Date().toISOString(),
+        productId: product.id,
+        productSku: product.sku || "S/C",
+        productTitle: product.title,
+        quantityGiven: Number(row.quantity),
+        unitAgreedPrice: Number(row.unitAgreedPrice) || product.precioEfectivo || product.price,
+        commissionPerUnit: Number(row.commissionPerUnit),
+        quantitySold: 0,
+        quantityReturned: 0,
+        status: "active",
+        notes: consignmentForm.notes.trim(),
+      };
+    });
 
-    // Deduct from warehouse stock
-    const updatedProducts = products.map((p) =>
-      p.id === product.id ? { ...p, stock: p.stock - qty } : p
-    );
-
-    const newConsignment: Consignment = {
-      id: "cons-" + Date.now(),
-      resellerId: reseller.id,
-      resellerName: reseller.name,
-      date: new Date().toISOString(),
-      productId: product.id,
-      productSku: product.sku || "S/C",
-      productTitle: product.title,
-      quantityGiven: qty,
-      unitAgreedPrice: Number(consignmentForm.unitAgreedPrice) || product.price,
-      quantitySold: 0,
-      quantityReturned: 0,
-      status: "active",
-      notes: consignmentForm.notes.trim(),
-    };
-
-    const updatedConsignments = [newConsignment, ...consignments];
-    persistAllData(updatedProducts, sales, resellers, updatedConsignments);
+    persistAllData(updatedProducts, sales, resellers, [...newConsignments, ...consignments]);
     setShowConsignmentModal(false);
+  };
+
+  // Definir o cambiar la comisión por unidad de un lote ya entregado
+  const handleSetLotCommission = (c: Consignment) => {
+    const value = window.prompt(
+      `Comisión por unidad vendida para "${c.productTitle}" (${c.resellerName}):`,
+      c.commissionPerUnit !== null && c.commissionPerUnit !== undefined ? String(c.commissionPerUnit) : ""
+    );
+    if (value === null) return;
+    const n = Number(value.replace(",", "."));
+    if (value.trim() === "" || !Number.isFinite(n) || n < 0) {
+      alert("Ingresá un monto válido (0 o más).");
+      return;
+    }
+    const updated = consignments.map((x) => (x.id === c.id ? { ...x, commissionPerUnit: n } : x));
+    persistAllData(products, sales, resellers, updated);
   };
 
   // Settle consignment (Rendir cuentas con revendedor)
@@ -1726,12 +1764,16 @@ export default function PecadosPage() {
       p.id === settlingConsignment.productId ? { ...p, stock: p.stock + returned } : p
     );
 
-    // 2. Si vendió unidades, registrar venta comercial
+    // 2. Si vendió unidades, registrar venta comercial (comisión: la del lote, obligatoria)
     let updatedSales = sales;
     if (sold > 0) {
-      const reseller = resellers.find((r) => r.id === settlingConsignment.resellerId);
+      const lotCommission = settlingConsignment.commissionPerUnit;
+      if (lotCommission === null || lotCommission === undefined) {
+        alert("Este lote no tiene comisión por unidad definida. Definila en la columna \"Comisión c/u\" antes de rendir.");
+        return;
+      }
       const subtotal = sold * settlingConsignment.unitAgreedPrice;
-      const commissionAmount = resellerCommission(reseller, sold, subtotal);
+      const commissionAmount = Math.round(lotCommission * sold * 100) / 100;
       const netToCollect = subtotal - commissionAmount;
 
       const newSale: Sale = {
@@ -1749,12 +1791,13 @@ export default function PecadosPage() {
             quantity: sold,
             unitPrice: settlingConsignment.unitAgreedPrice,
             subtotal,
+            commissionUnit: lotCommission,
           },
         ],
         totalAmount: subtotal,
         paymentMethod: settleForm.paymentMethod,
         status: "completed",
-        notes: `Rendición de lote. Comisión revendedor: $${commissionAmount.toLocaleString("es-AR")} (${resellerCommissionLabel(reseller)}). Neto cobrado: $${netToCollect.toLocaleString("es-AR")}.`,
+        notes: `Rendición de lote. Comisión revendedora: ${formatMoney(commissionAmount)} (${formatMoney(lotCommission)} c/u). Neto cobrado: $${netToCollect.toLocaleString("es-AR")}.`,
       };
       updatedSales = [newSale, ...sales];
     }
@@ -3010,6 +3053,14 @@ export default function PecadosPage() {
                                 <span className="text-blue-400 font-medium">Venta Directa</span>
                               )}
                             </span>
+                            {s.resellerId && (
+                              <span
+                                className={`mt-1 block text-[10px] font-bold ${s.commissionPending ? "text-amber-300" : "text-zinc-300"}`}
+                              >
+                                Comisión: {formatMoney(s.commissionTotal || 0)}
+                                {s.commissionPending ? " · a definir (artículo sin comisión asignada)" : ""}
+                              </span>
+                            )}
                             {s.notes?.includes("mercadería en consignación") && (
                               <span className="mt-1 block text-[10px] font-bold text-amber-300">
                                 📦 De su mercadería en consignación
@@ -3077,10 +3128,8 @@ export default function PecadosPage() {
                   onClick={() => {
                     setConsignmentForm({
                       resellerId: resellers[0]?.id || "",
-                      productId: products[0]?.id || "",
-                      quantityGiven: 10,
-                      unitAgreedPrice: products[0]?.price || 0,
                       notes: "",
+                      items: [newConsignmentRow(products.find((p) => p.stock > 0))],
                     });
                     setShowConsignmentModal(true);
                   }}
@@ -3110,7 +3159,9 @@ export default function PecadosPage() {
                   (sum, c) => sum + c.quantitySold * c.unitAgreedPrice,
                   0
                 );
-                const totalCommissionEarned = resellerCommission(r, totalUnitsSold, totalRevenueSold);
+                const resellerSales = sales.filter((s) => s.resellerId === r.id);
+                const totalCommissionEarned = resellerSales.reduce((sum, s) => sum + (s.commissionTotal || 0), 0);
+                const pendingCommissionSales = resellerSales.filter((s) => s.commissionPending).length;
 
                 return (
                   <div
@@ -3119,9 +3170,6 @@ export default function PecadosPage() {
                   >
                     <div>
                       <div className="flex items-center justify-between gap-2">
-                        <span className="px-2.5 py-0.5 rounded-full bg-red-950 text-red-300 border border-red-800 text-[10px] font-bold">
-                          Comisión: {resellerCommissionLabel(r)}
-                        </span>
                         {r.code && (
                           <span className="px-2 py-0.5 rounded-full bg-zinc-950 text-amber-300 border border-amber-800 text-[10px] font-bold font-mono">
                             {r.code}
@@ -3211,7 +3259,12 @@ export default function PecadosPage() {
                       )}
 
                       <span className="text-[11px] font-medium text-zinc-400">
-                        Comisión: <strong className="text-white">${totalCommissionEarned.toLocaleString("es-AR")}</strong>
+                        Comisión ganada: <strong className="text-white">{formatMoney(totalCommissionEarned)}</strong>
+                        {pendingCommissionSales > 0 && (
+                          <span className="ml-1 text-amber-300 font-bold" title="Ventas con algún artículo sin comisión definida">
+                            ({pendingCommissionSales} a definir)
+                          </span>
+                        )}
                       </span>
                     </div>
                   </div>
@@ -3242,6 +3295,7 @@ export default function PecadosPage() {
                           <th className="p-3.5 text-center">Vendido</th>
                           <th className="p-3.5 text-center">Pendiente</th>
                           <th className="p-3.5">P. Pactado</th>
+                          <th className="p-3.5">Comisión c/u</th>
                           <th className="p-3.5">Estado</th>
                           <th className="p-3.5 text-right">Acción</th>
                         </tr>
@@ -3263,6 +3317,22 @@ export default function PecadosPage() {
                               <td className="p-3.5 text-center font-bold text-emerald-400">{c.quantitySold} un.</td>
                               <td className="p-3.5 text-center font-bold text-amber-400">{pending} un.</td>
                               <td className="p-3.5 font-mono">${c.unitAgreedPrice.toLocaleString("es-AR")}</td>
+                              <td className="p-3.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetLotCommission(c)}
+                                  className={`font-mono text-[11px] px-2 py-0.5 rounded border cursor-pointer ${
+                                    c.commissionPerUnit === null || c.commissionPerUnit === undefined
+                                      ? "bg-amber-950 text-amber-300 border-amber-700 font-bold"
+                                      : "bg-zinc-950 text-zinc-200 border-zinc-700 hover:border-zinc-500"
+                                  }`}
+                                  title="Definir o cambiar la comisión por unidad de este lote"
+                                >
+                                  {c.commissionPerUnit === null || c.commissionPerUnit === undefined
+                                    ? "Definir"
+                                    : formatMoney(c.commissionPerUnit)}
+                                </button>
+                              </td>
                               <td className="p-3.5">
                                 {c.status === "settled" || pending <= 0 ? (
                                   <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold">
@@ -5106,45 +5176,6 @@ export default function PecadosPage() {
                       className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white font-mono"
                     />
                   </div>
-                  <div>
-                    <label className="text-zinc-400 font-medium block mb-1">Comisión</label>
-                    <div className="flex gap-1.5">
-                      <select
-                        value={resellerForm.commissionType}
-                        onChange={(e) => setResellerForm({ ...resellerForm, commissionType: e.target.value as "percent" | "fixed" })}
-                        className="w-[88px] shrink-0 px-2 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white"
-                        title="Tipo de comisión"
-                      >
-                        <option value="percent">%</option>
-                        <option value="fixed">$ fijo</option>
-                      </select>
-                      {resellerForm.commissionType === "fixed" ? (
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={resellerForm.commissionFixed}
-                          onChange={(e) => setResellerForm({ ...resellerForm, commissionFixed: Math.max(0, Number(e.target.value) || 0) })}
-                          className="w-full min-w-0 px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white font-mono"
-                          title="Monto fijo por unidad vendida"
-                        />
-                      ) : (
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          step="0.1"
-                          value={resellerForm.commissionPercent}
-                          onChange={(e) => setResellerForm({ ...resellerForm, commissionPercent: Math.min(100, Math.max(0, Number(e.target.value) || 0)) })}
-                          className="w-full min-w-0 px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white font-mono"
-                          title="Porcentaje sobre lo vendido"
-                        />
-                      )}
-                    </div>
-                    <span className="mt-1 block text-[10px] text-zinc-500">
-                      {resellerForm.commissionType === "fixed" ? "Monto fijo por cada unidad vendida" : "Porcentaje sobre el total vendido"}
-                    </span>
-                  </div>
                 </div>
 
                 <div>
@@ -5252,11 +5283,11 @@ export default function PecadosPage() {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-sm max-h-[92vh] flex flex-col rounded-2xl bg-zinc-900 border border-zinc-800 shadow-2xl text-zinc-100 z-10 overflow-hidden"
+              className="relative w-full max-w-lg max-h-[92vh] flex flex-col rounded-2xl bg-zinc-900 border border-zinc-800 shadow-2xl text-zinc-100 z-10 overflow-hidden"
             >
               <div className="flex items-center justify-between p-4 sm:p-5 border-b border-zinc-800 shrink-0">
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <Package className="w-4 h-4 text-amber-400" /> Entregar Lote para Revender
+                  <Package className="w-4 h-4 text-amber-400" /> Entregar Mercadería a Revendedora
                 </h3>
                 <button onClick={() => setShowConsignmentModal(false)} className="p-1 rounded-lg text-zinc-400 hover:text-white">
                   <X className="w-4 h-4" />
@@ -5265,7 +5296,7 @@ export default function PecadosPage() {
 
               <form onSubmit={handleSaveConsignment} className="p-4 sm:p-6 overflow-y-auto space-y-3.5 text-xs flex-1">
                 <div>
-                  <label className="text-zinc-400 font-medium block mb-1">Revendedor</label>
+                  <label className="text-zinc-400 font-medium block mb-1">Revendedora</label>
                   <select
                     required
                     value={consignmentForm.resellerId}
@@ -5274,58 +5305,122 @@ export default function PecadosPage() {
                   >
                     {resellers.map((r) => (
                       <option key={r.id} value={r.id}>
-                        {r.name} ({r.zone})
+                        {r.name}
+                        {r.zone ? ` — ${r.zone}` : ""}
                       </option>
                     ))}
                   </select>
                 </div>
 
                 <div>
-                  <label className="text-zinc-400 font-medium block mb-1">Producto</label>
-                  <select
-                    required
-                    value={consignmentForm.productId}
-                    onChange={(e) => {
-                      const sel = products.find((p) => p.id === e.target.value);
-                      setConsignmentForm({
-                        ...consignmentForm,
-                        productId: e.target.value,
-                        unitAgreedPrice: sel ? sel.price : 0,
-                      });
-                    }}
-                    className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white"
-                  >
-                    {products.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        [{p.sku}] {p.title} (Stock depósito: {p.stock} un.)
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-zinc-400 font-medium block mb-1">Cantidad a Entregar</label>
-                    <input
-                      type="number"
-                      required
-                      min={1}
-                      value={consignmentForm.quantityGiven}
-                      onChange={(e) => setConsignmentForm({ ...consignmentForm, quantityGiven: Number(e.target.value) })}
-                      className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white font-mono"
-                    />
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-zinc-400 font-medium">Artículos a entregar</label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setConsignmentForm({
+                          ...consignmentForm,
+                          items: [
+                            ...consignmentForm.items,
+                            newConsignmentRow(
+                              products.find((p) => p.stock > 0 && !consignmentForm.items.some((it) => it.productId === p.id))
+                            ),
+                          ],
+                        })
+                      }
+                      className="text-amber-400 hover:text-amber-300 text-[11px] font-bold"
+                    >
+                      + Agregar artículo
+                    </button>
                   </div>
-                  <div>
-                    <label className="text-zinc-400 font-medium block mb-1">Precio Pactado ($)</label>
-                    <input
-                      type="number"
-                      required
-                      min={0}
-                      value={consignmentForm.unitAgreedPrice}
-                      onChange={(e) => setConsignmentForm({ ...consignmentForm, unitAgreedPrice: Number(e.target.value) })}
-                      className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white font-mono"
-                    />
+                  <div className="space-y-2">
+                    {consignmentForm.items.map((row, idx) => {
+                      const sel = products.find((p) => p.id === row.productId);
+                      const update = (patch: Partial<ConsignmentRow>) =>
+                        setConsignmentForm({
+                          ...consignmentForm,
+                          items: consignmentForm.items.map((it, i) => (i === idx ? { ...it, ...patch } : it)),
+                        });
+                      const missingCommission = row.commissionPerUnit.trim() === "";
+                      return (
+                        <div key={idx} className="p-2.5 rounded-xl bg-zinc-950 border border-zinc-800 space-y-2">
+                          <div className="flex items-end gap-2">
+                            <div className="flex-1 min-w-0">
+                              <label className="text-[10px] text-zinc-500 block mb-0.5">Artículo</label>
+                              <select
+                                value={row.productId}
+                                onChange={(e) => {
+                                  const p = products.find((x) => x.id === e.target.value);
+                                  update({ productId: e.target.value, unitAgreedPrice: p?.precioEfectivo || p?.price || 0 });
+                                }}
+                                className="w-full min-w-0 bg-zinc-900 border border-zinc-800 px-2 py-1.5 rounded-lg text-white text-xs"
+                              >
+                                {products.map((p) => (
+                                  <option key={p.id} value={p.id} disabled={p.stock <= 0}>
+                                    {p.title} ({p.stock} en depósito)
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setConsignmentForm({ ...consignmentForm, items: consignmentForm.items.filter((_, i) => i !== idx) })}
+                              className="p-2 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-zinc-900"
+                              aria-label="Quitar artículo"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div>
+                              <label className="text-[10px] text-zinc-500 block mb-0.5">Cantidad</label>
+                              <input
+                                type="number"
+                                min={1}
+                                max={sel?.stock || 1}
+                                required
+                                value={row.quantity}
+                                onChange={(e) => update({ quantity: Math.max(1, Number(e.target.value) || 1) })}
+                                className="w-full px-2 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-white font-mono text-center"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-zinc-500 block mb-0.5">Precio venta c/u</label>
+                              <input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                required
+                                value={row.unitAgreedPrice}
+                                onChange={(e) => update({ unitAgreedPrice: Math.max(0, Number(e.target.value) || 0) })}
+                                className="w-full px-2 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-white font-mono"
+                              />
+                            </div>
+                            <div>
+                              <label className={`text-[10px] block mb-0.5 font-bold ${missingCommission ? "text-amber-300" : "text-zinc-500"}`}>
+                                Comisión c/u *
+                              </label>
+                              <input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                required
+                                value={row.commissionPerUnit}
+                                onChange={(e) => update({ commissionPerUnit: e.target.value })}
+                                placeholder="$ obligatorio"
+                                className={`w-full px-2 py-1.5 rounded-lg bg-zinc-900 border text-white font-mono ${
+                                  missingCommission ? "border-amber-600" : "border-zinc-800"
+                                }`}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
+                  <p className="mt-1.5 text-[10px] text-zinc-500">
+                    La comisión es un monto fijo por cada unidad que venda la revendedora (de este lote o con su código).
+                  </p>
                 </div>
 
                 <div>
@@ -5347,10 +5442,7 @@ export default function PecadosPage() {
                   >
                     Cancelar
                   </button>
-                  <button
-                    type="submit"
-                    className="px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold"
-                  >
+                  <button type="submit" className="px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold">
                     Registrar Entrega
                   </button>
                 </div>
@@ -5466,7 +5558,8 @@ export default function PecadosPage() {
                     {(() => {
                       const res = resellers.find((r) => r.id === settlingConsignment.resellerId);
                       const gross = settleForm.quantitySold * settlingConsignment.unitAgreedPrice;
-                      const comm = resellerCommission(res, settleForm.quantitySold, gross);
+                      const cpu = settlingConsignment.commissionPerUnit;
+                      const comm = (cpu ?? 0) * settleForm.quantitySold;
                       const net = gross - comm;
                       return (
                         <>
@@ -5475,7 +5568,9 @@ export default function PecadosPage() {
                             <strong className="font-mono">${gross.toLocaleString("es-AR")}</strong>
                           </div>
                           <div className="flex justify-between text-amber-300">
-                            <span>Comisión Revendedor ({resellerCommissionLabel(res)}):</span>
+                            <span>
+                              Comisión Revendedora ({cpu === null || cpu === undefined ? "sin definir" : `${formatMoney(cpu)} c/u`}):
+                            </span>
                             <strong className="font-mono">-${comm.toLocaleString("es-AR")}</strong>
                           </div>
                           <div className="flex justify-between text-emerald-400 font-bold pt-1 border-t border-emerald-800/40">

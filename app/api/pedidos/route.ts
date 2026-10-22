@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getClientIp, isSameOriginJson, rateLimit } from "@/lib/auth";
 import { SKU_PATTERN, isProductComplete, precioPublicoTC } from "@/lib/pricing";
 import { findResellerByCode, normalizeResellerCode } from "@/lib/reseller-auth";
+import { commissionTotals, commissionUnitFor, withCommission } from "@/lib/commission";
 
 const MAX_ITEMS = 30;
 const MAX_QTY_PER_ITEM = 10;
@@ -82,6 +83,12 @@ export async function POST(request: Request) {
         });
       }
 
+      // Compra con código: comisión de la revendedora según lo que tiene asignado para cada artículo
+      const finalItems = codeOwner
+        ? await Promise.all(items.map(async (i) => withCommission(i, await commissionUnitFor(tx, codeOwner.id, i.productId))))
+        : items;
+      const commission = codeOwner ? commissionTotals(finalItems as any) : { commissionTotal: 0, commissionPending: false };
+
       return tx.pecadoSale.create({
         data: {
           buyerName: buyerName || "Cliente Web WhatsApp",
@@ -89,11 +96,12 @@ export async function POST(request: Request) {
           resellerId: codeOwner?.id ?? null,
           resellerName: codeOwner?.name ?? null,
           resellerCode: codeOwner?.code ?? null,
+          ...commission,
           totalAmount: items.reduce((s, i) => s + i.subtotal, 0),
           paymentMethod: "otro",
           status: "completed",
           notes: buyerAddress ? `Dirección: ${buyerAddress}` : "",
-          items: { create: items },
+          items: { create: finalItems },
         },
       });
     });

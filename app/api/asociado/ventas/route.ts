@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { isSameOriginJson, rateLimit } from "@/lib/auth";
 import { getSessionReseller } from "@/lib/reseller-auth";
+import { commissionTotals, commissionUnitFor, withCommission, type CommissionedItem } from "@/lib/commission";
 import { isProductComplete, precioPublicoTC } from "@/lib/pricing";
 import { PAYMENT_METHOD_OPTIONS, isCashPriceMethod, type PaymentMethod } from "@/app/products";
 
@@ -58,7 +59,7 @@ export async function POST(request: Request) {
 
   try {
     const sale = await prisma.$transaction(async (tx) => {
-      const items: { productId: string; productSku: string; productTitle: string; quantity: number; unitPrice: number; subtotal: number }[] = [];
+      const items: ({ productId: string; productSku: string; productTitle: string; quantity: number; unitPrice: number; subtotal: number } & CommissionedItem)[] = [];
       for (const [key, qty] of wanted) {
         const id = key.slice(2);
         if (key.startsWith("c:")) {
@@ -80,14 +81,20 @@ export async function POST(request: Request) {
             });
           }
           fromConsignment = true;
-          items.push({
-            productId: c.productId,
-            productSku: c.productSku,
-            productTitle: c.productTitle,
-            quantity: qty,
-            unitPrice: c.unitAgreedPrice,
-            subtotal: Math.round(c.unitAgreedPrice * qty * 100) / 100,
-          });
+          // Comisión: la del lote vendido
+          items.push(
+            withCommission(
+              {
+                productId: c.productId,
+                productSku: c.productSku,
+                productTitle: c.productTitle,
+                quantity: qty,
+                unitPrice: c.unitAgreedPrice,
+                subtotal: Math.round(c.unitAgreedPrice * qty * 100) / 100,
+              },
+              c.commissionPerUnit
+            )
+          );
           continue;
         }
 
@@ -100,14 +107,20 @@ export async function POST(request: Request) {
         if (upd.count === 0) throw Object.assign(new Error("NO_STOCK"), { title: p.title, stock: p.stock });
         // Efectivo / transferencia / Mercado Pago: Precio Público FT. Tarjeta y otros: Precio Público TC.
         const unitPrice = isCashPriceMethod(paymentMethod) ? p.precioEfectivo : precioPublicoTC(p.precioEfectivo);
-        items.push({
-          productId: p.id,
-          productSku: p.sku,
-          productTitle: p.title,
-          quantity: qty,
-          unitPrice,
-          subtotal: Math.round(unitPrice * qty * 100) / 100,
-        });
+        // Del depósito: comisión asignada a esta revendedora para ese artículo (último lote)
+        items.push(
+          withCommission(
+            {
+              productId: p.id,
+              productSku: p.sku,
+              productTitle: p.title,
+              quantity: qty,
+              unitPrice,
+              subtotal: Math.round(unitPrice * qty * 100) / 100,
+            },
+            await commissionUnitFor(tx, reseller.id, p.id)
+          )
+        );
       }
 
       return tx.pecadoSale.create({
@@ -117,6 +130,7 @@ export async function POST(request: Request) {
           channel: "reseller",
           resellerId: reseller.id,
           resellerName: reseller.name,
+          ...commissionTotals(items),
           totalAmount: Math.round(items.reduce((t, i) => t + i.subtotal, 0) * 100) / 100,
           paymentMethod,
           status: "completed",

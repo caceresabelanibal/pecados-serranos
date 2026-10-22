@@ -37,11 +37,15 @@ export async function GET(request: Request) {
         paymentMethod: s.paymentMethod,
         resellerCode: s.resellerCode,
         notes: s.notes,
+        commissionTotal: s.commissionTotal,
+        commissionPending: s.commissionPending,
         items: s.items.map((i) => ({
           productTitle: i.productTitle,
           quantity: i.quantity,
           unitPrice: i.unitPrice,
           subtotal: i.subtotal,
+          commissionUnit: i.commissionUnit,
+          commission: i.commission,
         })),
       })),
       consignments: consignments.map((c) => ({
@@ -55,6 +59,7 @@ export async function GET(request: Request) {
         quantityReturned: c.quantityReturned,
         pending: Math.max(0, c.quantityGiven - c.quantitySold - c.quantityReturned),
         unitAgreedPrice: c.unitAgreedPrice,
+        commissionPerUnit: c.commissionPerUnit,
         status: c.status,
         notes: c.notes,
       })),
