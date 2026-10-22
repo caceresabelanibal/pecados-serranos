@@ -12,14 +12,17 @@ export async function GET(request: Request) {
   const reseller = await getSessionReseller(request);
   if (!reseller) return NextResponse.json({ reseller: null }, { headers: NO_STORE });
 
-  const [sales, products] = await Promise.all([
+  const [sales, products, consignments] = await Promise.all([
     prisma.pecadoSale.findMany({
       where: { resellerId: reseller.id },
       include: { items: true },
       orderBy: { date: "desc" },
     }),
     prisma.pecadoProduct.findMany({ where: { active: true }, orderBy: { title: "asc" } }),
+    // Mercadería entregada a ESTA asociada
+    prisma.pecadoConsignment.findMany({ where: { resellerId: reseller.id }, orderBy: { date: "desc" } }),
   ]);
+  const imageById = new Map(products.map((p) => [p.id, p.image]));
 
   return NextResponse.json(
     {
@@ -40,6 +43,20 @@ export async function GET(request: Request) {
           unitPrice: i.unitPrice,
           subtotal: i.subtotal,
         })),
+      })),
+      consignments: consignments.map((c) => ({
+        id: c.id,
+        date: c.date.toISOString(),
+        productId: c.productId,
+        productTitle: c.productTitle,
+        image: imageById.get(c.productId) || "",
+        quantityGiven: c.quantityGiven,
+        quantitySold: c.quantitySold,
+        quantityReturned: c.quantityReturned,
+        pending: Math.max(0, c.quantityGiven - c.quantitySold - c.quantityReturned),
+        unitAgreedPrice: c.unitAgreedPrice,
+        status: c.status,
+        notes: c.notes,
       })),
       // Sólo lo necesario para vender (sin costos ni márgenes)
       products: products

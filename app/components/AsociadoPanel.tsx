@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { BarChart3, Loader2, LogOut, Plus, Receipt, Trash2, UserCheck, X } from "lucide-react";
+import { BarChart3, Loader2, LogOut, Package, Plus, Receipt, Trash2, UserCheck, X } from "lucide-react";
 import { PAYMENT_METHOD_LABELS, PAYMENT_METHOD_OPTIONS, isCashPriceMethod, type PaymentMethod } from "@/app/products";
 import { formatMoney } from "@/lib/pricing";
 
@@ -13,6 +13,20 @@ interface AsociadoProduct {
   precioFT: number;
   precioTC: number;
 }
+interface AsociadoConsignment {
+  id: string;
+  date: string;
+  productId: string;
+  productTitle: string;
+  image: string;
+  quantityGiven: number;
+  quantitySold: number;
+  quantityReturned: number;
+  pending: number;
+  unitAgreedPrice: number;
+  status: string;
+  notes: string;
+}
 interface AsociadoSale {
   id: string;
   date: string;
@@ -21,25 +35,42 @@ interface AsociadoSale {
   totalAmount: number;
   paymentMethod: string;
   resellerCode?: string | null;
+  notes?: string;
   items: { productTitle: string; quantity: number; unitPrice: number; subtotal: number }[];
 }
 interface AsociadoData {
   reseller: { id: string; name: string; zone: string; code: string | null };
   sales: AsociadoSale[];
   products: AsociadoProduct[];
+  consignments: AsociadoConsignment[];
+}
+
+// Cada ítem de la venta sale de su mercadería ("c:<consignación>") o del depósito ("p:<producto>")
+interface SaleOption {
+  key: string;
+  label: string;
+  available: number;
+  unit: (m: PaymentMethod) => number;
+  list: number;
 }
 
 interface Props {
   onLogout: () => void;
 }
 
-const unitPrice = (p: AsociadoProduct | undefined, method: PaymentMethod) =>
-  p ? (isCashPriceMethod(method) ? p.precioFT : p.precioTC) : 0;
+const fmtDate = (iso: string, withTime = true) =>
+  new Date(iso).toLocaleString("es-AR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    ...(withTime ? { hour: "2-digit", minute: "2-digit" } : {}),
+  });
 
-// Perfil "Asociado" (revendedor): sólo sus ventas y el registro de nuevas ventas
+// Perfil "Asociado" (revendedor): sólo sus ventas, su mercadería y el registro de nuevas ventas
 export default function AsociadoPanel({ onLogout }: Props) {
   const [data, setData] = useState<AsociadoData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<"ventas" | "mercaderia">("ventas");
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -48,7 +79,7 @@ export default function AsociadoPanel({ onLogout }: Props) {
     buyerPhone: string;
     paymentMethod: PaymentMethod;
     notes: string;
-    items: { productId: string; quantity: number }[];
+    items: { key: string; quantity: number }[];
   }>({ buyerName: "", buyerPhone: "", paymentMethod: "efectivo", notes: "", items: [] });
 
   const load = useCallback(async () => {
@@ -70,21 +101,49 @@ export default function AsociadoPanel({ onLogout }: Props) {
     load();
   }, [load]);
 
-  const productById = useMemo(() => new Map((data?.products || []).map((p) => [p.id, p])), [data]);
+  // Opciones para vender: primero su mercadería en mano, después el depósito de la tienda
+  const consignmentOptions = useMemo<SaleOption[]>(
+    () =>
+      (data?.consignments || [])
+        .filter((c) => c.pending > 0)
+        .map((c) => ({
+          key: `c:${c.id}`,
+          label: `${c.productTitle} — ${c.pending} en mano`,
+          available: c.pending,
+          unit: () => c.unitAgreedPrice,
+          list: c.unitAgreedPrice,
+        })),
+    [data]
+  );
+  const productOptions = useMemo<SaleOption[]>(
+    () =>
+      (data?.products || []).map((p) => ({
+        key: `p:${p.id}`,
+        label: `${p.title}${p.stock <= 0 ? " (sin stock)" : ""}`,
+        available: p.stock,
+        unit: (m: PaymentMethod) => (isCashPriceMethod(m) ? p.precioFT : p.precioTC),
+        list: p.precioTC,
+      })),
+    [data]
+  );
+  const optionByKey = useMemo(
+    () => new Map([...consignmentOptions, ...productOptions].map((o) => [o.key, o])),
+    [consignmentOptions, productOptions]
+  );
 
-  const firstFreeProduct = (items: { productId: string }[]) =>
-    (data?.products || []).find((p) => p.stock > 0 && !items.some((i) => i.productId === p.id)) ||
-    (data?.products || []).find((p) => p.stock > 0);
+  const firstFreeOption = (items: { key: string }[]) =>
+    [...consignmentOptions, ...productOptions].find((o) => o.available > 0 && !items.some((i) => i.key === o.key)) ||
+    [...consignmentOptions, ...productOptions].find((o) => o.available > 0);
 
-  const openModal = () => {
-    const first = firstFreeProduct([]);
-    setForm({ buyerName: "", buyerPhone: "", paymentMethod: "efectivo", notes: "", items: first ? [{ productId: first.id, quantity: 1 }] : [] });
+  const openModal = (presetKey?: string) => {
+    const first = presetKey ? optionByKey.get(presetKey) : firstFreeOption([]);
+    setForm({ buyerName: "", buyerPhone: "", paymentMethod: "efectivo", notes: "", items: first ? [{ key: first.key, quantity: 1 }] : [] });
     setError("");
     setShowModal(true);
   };
 
-  const listTotal = form.items.reduce((t, i) => t + (productById.get(i.productId)?.precioTC || 0) * i.quantity, 0);
-  const total = form.items.reduce((t, i) => t + unitPrice(productById.get(i.productId), form.paymentMethod) * i.quantity, 0);
+  const listTotal = form.items.reduce((t, i) => t + (optionByKey.get(i.key)?.list || 0) * i.quantity, 0);
+  const total = form.items.reduce((t, i) => t + (optionByKey.get(i.key)?.unit(form.paymentMethod) || 0) * i.quantity, 0);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,7 +157,17 @@ export default function AsociadoPanel({ onLogout }: Props) {
       const res = await fetch("/api/asociado/ventas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          buyerName: form.buyerName,
+          buyerPhone: form.buyerPhone,
+          paymentMethod: form.paymentMethod,
+          notes: form.notes,
+          items: form.items.map((i) =>
+            i.key.startsWith("c:")
+              ? { consignmentId: i.key.slice(2), quantity: i.quantity }
+              : { productId: i.key.slice(2), quantity: i.quantity }
+          ),
+        }),
       });
       const out = await res.json().catch(() => null);
       if (res.status === 401) {
@@ -117,8 +186,76 @@ export default function AsociadoPanel({ onLogout }: Props) {
   };
 
   const sales = data?.sales || [];
+  const consignments = data?.consignments || [];
   const totalVendido = sales.reduce((t, s) => t + s.totalAmount, 0);
   const unidades = sales.reduce((t, s) => t + s.items.reduce((u, i) => u + i.quantity, 0), 0);
+  const enMano = consignments.reduce((t, c) => t + c.pending, 0);
+  const valorEnMano = consignments.reduce((t, c) => t + c.pending * c.unitAgreedPrice, 0);
+  const activas = consignments.filter((c) => c.pending > 0);
+  const cerradas = consignments.filter((c) => c.pending <= 0);
+
+  const kpi = (items: [string, string, string][]) => (
+    <div className="grid grid-cols-3 gap-2 sm:gap-4">
+      {items.map(([label, value, color]) => (
+        <div key={label} className="p-3 sm:p-4 rounded-2xl bg-zinc-900/80 border border-zinc-800">
+          <span className="block text-[10px] sm:text-[11px] uppercase font-semibold text-zinc-400 leading-tight">{label}</span>
+          <span className={`block mt-1 text-lg sm:text-2xl font-black font-mono break-words ${color}`}>{value}</span>
+        </div>
+      ))}
+    </div>
+  );
+
+  const consignmentCard = (c: AsociadoConsignment) => (
+    <div key={c.id} className={`p-3 sm:p-4 rounded-2xl border ${c.pending > 0 ? "bg-zinc-900/70 border-zinc-800" : "bg-zinc-950/60 border-zinc-900 opacity-80"}`}>
+      <div className="flex gap-3">
+        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-white overflow-hidden shrink-0 border border-zinc-800">
+          {c.image && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={c.image} alt={c.productTitle} className="w-full h-full object-contain" />
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <span className="text-sm font-bold text-white leading-snug">{c.productTitle}</span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                c.pending > 0 ? "bg-amber-950 text-amber-300 border-amber-800" : "bg-zinc-900 text-zinc-400 border-zinc-700"
+              }`}
+            >
+              {c.pending > 0 ? `${c.pending} en mano` : "Rendida"}
+            </span>
+          </div>
+          <span className="block text-[11px] text-zinc-400 mt-0.5">Entregada el {fmtDate(c.date, false)}</span>
+          <span className="block text-xs text-white mt-1">
+            Precio de venta: <strong className="font-mono">{formatMoney(c.unitAgreedPrice)}</strong> c/u
+          </span>
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-4 gap-1.5 text-center">
+        {[
+          ["Entregadas", c.quantityGiven, "text-white"],
+          ["Vendidas", c.quantitySold, "text-emerald-400"],
+          ["Devueltas", c.quantityReturned, "text-zinc-400"],
+          ["En mano", c.pending, "text-amber-300"],
+        ].map(([label, value, color]) => (
+          <div key={label as string} className="p-1.5 rounded-lg bg-zinc-950 border border-zinc-800">
+            <span className="block text-[9px] uppercase text-zinc-500 font-semibold">{label}</span>
+            <span className={`block text-sm font-black font-mono ${color}`}>{value}</span>
+          </div>
+        ))}
+      </div>
+      {c.notes && <p className="mt-2 text-[11px] text-zinc-400">{c.notes}</p>}
+      {c.pending > 0 && (
+        <button
+          type="button"
+          onClick={() => openModal(`c:${c.id}`)}
+          className="mt-3 w-full py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+        >
+          <Plus className="w-3.5 h-3.5" /> Registrar venta de este producto
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-[#0a0506] text-zinc-100">
@@ -143,19 +280,51 @@ export default function AsociadoPanel({ onLogout }: Props) {
             <LogOut className="w-3.5 h-3.5" /> Salir
           </button>
         </div>
+        {/* Pestañas */}
+        <div className="max-w-5xl mx-auto px-4 pb-2 flex gap-1.5">
+          {(
+            [
+              ["ventas", "Mis ventas", BarChart3, sales.length],
+              ["mercaderia", "Mi mercadería", Package, enMano],
+            ] as const
+          ).map(([key, label, Icon, count]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTab(key)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer ${
+                tab === key ? "bg-red-600 text-white" : "text-zinc-300 hover:text-white hover:bg-zinc-800/60"
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" /> {label} ({count})
+            </button>
+          ))}
+        </div>
       </div>
 
       <main className="max-w-5xl mx-auto px-4 py-6 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-black text-white flex items-center gap-2">
-              <BarChart3 className="w-6 h-6 text-amber-400" /> Mis ventas
+              {tab === "ventas" ? (
+                <>
+                  <BarChart3 className="w-6 h-6 text-amber-400" /> Mis ventas
+                </>
+              ) : (
+                <>
+                  <Package className="w-6 h-6 text-amber-400" /> Mi mercadería
+                </>
+              )}
             </h1>
-            <p className="text-xs text-zinc-400 mt-1">Ventas registradas a tu nombre y compras hechas con tu código.</p>
+            <p className="text-xs text-zinc-400 mt-1">
+              {tab === "ventas"
+                ? "Ventas registradas a tu nombre y compras hechas con tu código."
+                : "Productos que te entregó la tienda para vender, con su precio y lo que te queda en mano."}
+            </p>
           </div>
           <button
             type="button"
-            onClick={openModal}
+            onClick={() => openModal()}
             disabled={loading || !data}
             className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-sm font-bold flex items-center justify-center gap-1.5 cursor-pointer"
           >
@@ -163,55 +332,79 @@ export default function AsociadoPanel({ onLogout }: Props) {
           </button>
         </div>
 
-        <div className="grid grid-cols-3 gap-2 sm:gap-4">
-          {[
-            ["Ventas", String(sales.length), "text-white"],
-            ["Unidades", String(unidades), "text-amber-300"],
-            ["Total vendido", formatMoney(totalVendido), "text-emerald-400"],
-          ].map(([label, value, color]) => (
-            <div key={label} className="p-3 sm:p-4 rounded-2xl bg-zinc-900/80 border border-zinc-800">
-              <span className="block text-[10px] sm:text-[11px] uppercase font-semibold text-zinc-400 leading-tight">{label}</span>
-              <span className={`block mt-1 text-lg sm:text-2xl font-black font-mono break-words ${color}`}>{value}</span>
-            </div>
-          ))}
-        </div>
-
         {loading ? (
           <div className="py-16 flex justify-center text-zinc-500">
             <Loader2 className="w-6 h-6 animate-spin" />
           </div>
-        ) : sales.length === 0 ? (
-          <div className="p-8 rounded-2xl bg-zinc-900/60 border border-zinc-800 text-center text-sm text-zinc-400">
-            Todavía no tenés ventas registradas. Tocá <strong>Registrar venta</strong> para cargar la primera.
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {sales.map((s) => (
-              <div key={s.id} className="p-4 rounded-2xl bg-zinc-900/70 border border-zinc-800">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <span className="block text-sm font-bold text-white">{s.buyerName || "Cliente"}</span>
-                    <span className="block text-[11px] text-zinc-400">
-                      {new Date(s.date).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
-                      {" · "}
-                      {s.channel === "web_whatsapp" ? `Tienda online (código ${s.resellerCode || ""})` : "Venta registrada"}
-                      {" · "}
-                      {PAYMENT_METHOD_LABELS[s.paymentMethod] || s.paymentMethod}
-                    </span>
-                  </div>
-                  <span className="text-lg font-black font-mono text-emerald-400">{formatMoney(s.totalAmount)}</span>
-                </div>
-                <ul className="mt-2 space-y-0.5">
-                  {s.items.map((i, idx) => (
-                    <li key={idx} className="text-xs text-zinc-300">
-                      <strong className="text-white">{i.quantity}x</strong> {i.productTitle}{" "}
-                      <span className="text-zinc-500">— {formatMoney(i.subtotal)}</span>
-                    </li>
-                  ))}
-                </ul>
+        ) : tab === "ventas" ? (
+          <>
+            {kpi([
+              ["Ventas", String(sales.length), "text-white"],
+              ["Unidades", String(unidades), "text-amber-300"],
+              ["Total vendido", formatMoney(totalVendido), "text-emerald-400"],
+            ])}
+            {sales.length === 0 ? (
+              <div className="p-8 rounded-2xl bg-zinc-900/60 border border-zinc-800 text-center text-sm text-zinc-400">
+                Todavía no tenés ventas registradas. Tocá <strong>Registrar venta</strong> para cargar la primera.
               </div>
-            ))}
-          </div>
+            ) : (
+              <div className="space-y-3">
+                {sales.map((s) => (
+                  <div key={s.id} className="p-4 rounded-2xl bg-zinc-900/70 border border-zinc-800">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <span className="block text-sm font-bold text-white">{s.buyerName || "Cliente"}</span>
+                        <span className="block text-[11px] text-zinc-400">
+                          {fmtDate(s.date)}
+                          {" · "}
+                          {s.channel === "web_whatsapp" ? `Tienda online (código ${s.resellerCode || ""})` : "Venta registrada"}
+                          {" · "}
+                          {PAYMENT_METHOD_LABELS[s.paymentMethod] || s.paymentMethod}
+                        </span>
+                        {s.notes?.includes("mercadería en consignación") && (
+                          <span className="mt-1 inline-block px-2 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-800 text-[10px] font-bold">
+                            De tu mercadería
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-lg font-black font-mono text-emerald-400">{formatMoney(s.totalAmount)}</span>
+                    </div>
+                    <ul className="mt-2 space-y-0.5">
+                      {s.items.map((i, idx) => (
+                        <li key={idx} className="text-xs text-zinc-300">
+                          <strong className="text-white">{i.quantity}x</strong> {i.productTitle}{" "}
+                          <span className="text-zinc-500">— {formatMoney(i.subtotal)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            {kpi([
+              ["En mano", `${enMano} u.`, "text-amber-300"],
+              ["Valor en mano", formatMoney(valorEnMano), "text-emerald-400"],
+              ["Vendidas", `${consignments.reduce((t, c) => t + c.quantitySold, 0)} u.`, "text-white"],
+            ])}
+            {consignments.length === 0 ? (
+              <div className="p-8 rounded-2xl bg-zinc-900/60 border border-zinc-800 text-center text-sm text-zinc-400">
+                La tienda todavía no te entregó mercadería para vender.
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {activas.length > 0 && <div className="grid sm:grid-cols-2 gap-3">{activas.map(consignmentCard)}</div>}
+                {cerradas.length > 0 && (
+                  <div className="space-y-2">
+                    <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Rendidas / sin unidades en mano</h2>
+                    <div className="grid sm:grid-cols-2 gap-3">{cerradas.map(consignmentCard)}</div>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         )}
       </main>
 
@@ -277,6 +470,9 @@ export default function AsociadoPanel({ onLogout }: Props) {
                       </option>
                     ))}
                   </select>
+                  <span className="mt-1 block text-[10px] text-zinc-500">
+                    Tu mercadería se vende al precio acordado. Del depósito: efectivo/transferencia/Mercado Pago a precio en efectivo, tarjeta a precio de la tienda.
+                  </span>
                 </div>
 
                 <div>
@@ -285,8 +481,8 @@ export default function AsociadoPanel({ onLogout }: Props) {
                     <button
                       type="button"
                       onClick={() => {
-                        const p = firstFreeProduct(form.items);
-                        if (p) setForm({ ...form, items: [...form.items, { productId: p.id, quantity: 1 }] });
+                        const o = firstFreeOption(form.items);
+                        if (o) setForm({ ...form, items: [...form.items, { key: o.key, quantity: 1 }] });
                       }}
                       className="text-red-400 hover:text-red-300 text-[11px] font-bold"
                     >
@@ -295,9 +491,10 @@ export default function AsociadoPanel({ onLogout }: Props) {
                   </div>
                   <div className="space-y-2">
                     {form.items.map((item, idx) => {
-                      const p = productById.get(item.productId);
-                      const unit = unitPrice(p, form.paymentMethod);
-                      const update = (patch: Partial<{ productId: string; quantity: number }>) =>
+                      const o = optionByKey.get(item.key);
+                      const unit = o ? o.unit(form.paymentMethod) : 0;
+                      const max = Math.max(1, o?.available || 1);
+                      const update = (patch: Partial<{ key: string; quantity: number }>) =>
                         setForm({ ...form, items: form.items.map((it, i) => (i === idx ? { ...it, ...patch } : it)) });
                       return (
                         <div
@@ -307,16 +504,26 @@ export default function AsociadoPanel({ onLogout }: Props) {
                           <div className="col-span-3 sm:col-span-1 min-w-0">
                             <label className="text-[10px] text-zinc-500 block mb-0.5">Producto</label>
                             <select
-                              value={item.productId}
-                              onChange={(e) => update({ productId: e.target.value, quantity: 1 })}
+                              value={item.key}
+                              onChange={(e) => update({ key: e.target.value, quantity: 1 })}
                               className="w-full min-w-0 bg-zinc-900 border border-zinc-800 px-2 py-1.5 rounded-lg text-white text-xs"
                             >
-                              {data.products.map((op) => (
-                                <option key={op.id} value={op.id} disabled={op.stock <= 0}>
-                                  {op.title}
-                                  {op.stock <= 0 ? " (sin stock)" : ""}
-                                </option>
-                              ))}
+                              {consignmentOptions.length > 0 && (
+                                <optgroup label="Mi mercadería (en mano)">
+                                  {consignmentOptions.map((op) => (
+                                    <option key={op.key} value={op.key}>
+                                      {op.label}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
+                              <optgroup label="Depósito de la tienda">
+                                {productOptions.map((op) => (
+                                  <option key={op.key} value={op.key} disabled={op.available <= 0}>
+                                    {op.label}
+                                  </option>
+                                ))}
+                              </optgroup>
                             </select>
                           </div>
                           <div className="min-w-0">
@@ -328,9 +535,9 @@ export default function AsociadoPanel({ onLogout }: Props) {
                             <input
                               type="number"
                               min={1}
-                              max={p?.stock || 1}
+                              max={max}
                               value={item.quantity}
-                              onChange={(e) => update({ quantity: Math.min(Math.max(1, Number(e.target.value) || 1), Math.max(1, p?.stock || 1)) })}
+                              onChange={(e) => update({ quantity: Math.min(Math.max(1, Number(e.target.value) || 1), max) })}
                               className="w-full px-2 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-white font-mono text-center"
                             />
                           </div>
@@ -342,9 +549,10 @@ export default function AsociadoPanel({ onLogout }: Props) {
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
-                          {p && (
+                          {o && (
                             <p className="col-span-3 sm:col-span-4 text-[10px] text-zinc-500">
-                              Stock disponible: {p.stock} · Subtotal: <span className="text-zinc-300 font-mono">{formatMoney(unit * item.quantity)}</span>
+                              {item.key.startsWith("c:") ? "De tu mercadería · en mano" : "Del depósito · stock disponible"}: {o.available} · Subtotal:{" "}
+                              <span className="text-zinc-300 font-mono">{formatMoney(unit * item.quantity)}</span>
                             </p>
                           )}
                         </div>
@@ -367,7 +575,7 @@ export default function AsociadoPanel({ onLogout }: Props) {
                 {form.items.length > 0 && (
                   <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 space-y-1">
                     <div className="flex justify-between text-zinc-400">
-                      <span>Precio de la tienda</span>
+                      <span>Precio de lista</span>
                       <span className="font-mono">{formatMoney(listTotal)}</span>
                     </div>
                     {listTotal - total > 0.005 && (

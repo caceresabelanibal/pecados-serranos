@@ -593,6 +593,14 @@ export async function POST(request: Request) {
           for (const p of products) {
             const cleanSku = p.sku ? p.sku.trim().toUpperCase() : `PEC-${Date.now().toString().slice(-4)}`;
             const pricing = normalizePricing(p);
+            // Stock: si el panel informa el stock con el que cargó (stockBase), se aplica sólo la
+            // diferencia sobre el valor actual. Así no se pisan ventas hechas mientras tanto
+            // (tienda online, asociados) con datos viejos del panel.
+            let stock = Math.max(0, Math.round(Number(p.stock) || 0));
+            if (typeof p.stockBase === "number") {
+              const current = await prisma.pecadoProduct.findUnique({ where: { sku: cleanSku }, select: { stock: true } });
+              if (current) stock = Math.max(0, current.stock + (stock - Math.round(p.stockBase)));
+            }
             // Fotos subidas desde el panel (data URI) se guardan en la tabla de imágenes
             let image = typeof p.image === "string" ? p.image : "";
             if (image.startsWith("data:image/") && (await saveDataUriImage(cleanSku, image))) {
@@ -612,7 +620,7 @@ export async function POST(request: Request) {
                 description: p.description || "",
                 ...pricing,
                 precioFinalProveedor: p.precioFinalProveedor || 0,
-                stock: p.stock ?? 0,
+                stock,
                 minStock: p.minStock ?? 2,
                 observaciones: p.observaciones || "",
                 image,
@@ -663,12 +671,21 @@ export async function POST(request: Request) {
         // 3. Guardar consignaciones
         if (consignments && Array.isArray(consignments)) {
           for (const c of consignments) {
+            // Vendido y devuelto sólo pueden crecer: un panel con datos viejos no puede
+            // deshacer ventas registradas por la asociada mientras tanto
+            const prev = await prisma.pecadoConsignment.findUnique({
+              where: { id: c.id },
+              select: { quantityGiven: true, quantitySold: true, quantityReturned: true },
+            });
+            const sold = Math.max(prev?.quantitySold ?? 0, Number(c.quantitySold) || 0);
+            const returned = Math.max(prev?.quantityReturned ?? 0, Number(c.quantityReturned) || 0);
+            const given = prev?.quantityGiven ?? (Number(c.quantityGiven) || 0);
             await prisma.pecadoConsignment.upsert({
               where: { id: c.id },
               update: {
-                quantitySold: c.quantitySold || 0,
-                quantityReturned: c.quantityReturned || 0,
-                status: c.status || "active",
+                quantitySold: sold,
+                quantityReturned: returned,
+                status: sold + returned >= given ? "settled" : "active",
                 notes: c.notes || "",
               },
               create: {

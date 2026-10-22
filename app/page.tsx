@@ -803,7 +803,8 @@ export default function PecadosPage() {
         const data = await res.json();
 
         if (data.products && Array.isArray(data.products) && data.products.length > 0) {
-          setProducts(data.products);
+          // stockBase: stock tal como vino del servidor (al guardar se envía sólo la diferencia)
+          setProducts(data.products.map((p: Product) => ({ ...p, stockBase: p.stock })));
         }
         if (data.sales && Array.isArray(data.sales)) {
           setSales(data.sales);
@@ -851,17 +852,20 @@ export default function PecadosPage() {
     // 2. Centralized server persist to PostgreSQL
     setIsSavingServer(true);
     try {
+      const body = JSON.stringify({
+        products: newProds,
+        sales: newSales,
+        resellers: newResellers,
+        consignments: newConsignments,
+        purchases: newPurchases,
+        whatsappNumber: newWhatsapp ?? whatsappNumber,
+      });
+      // Los próximos cambios de stock se calculan desde lo que se acaba de enviar
+      setProducts(newProds.map((p) => ({ ...p, stockBase: p.stock })));
       const res = await fetch("/api/pecados/productos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          products: newProds,
-          sales: newSales,
-          resellers: newResellers,
-          consignments: newConsignments,
-          purchases: newPurchases,
-          whatsappNumber: newWhatsapp ?? whatsappNumber,
-        }),
+        body,
       });
 
       if (res.status === 401) {
@@ -880,6 +884,8 @@ export default function PecadosPage() {
         } else {
           setCloudStatus("server_memory");
         }
+        // Resincronizar con el servidor (stock y consignaciones reales, incluidas ventas hechas en el medio)
+        fetchServerData();
       }
     } catch (err) {
       console.error("Error al publicar datos en el servidor:", err);
@@ -1691,8 +1697,11 @@ export default function PecadosPage() {
     const sold = Number(settleForm.quantitySold) || 0;
     const returned = Number(settleForm.quantityReturned) || 0;
 
-    if (sold + returned > settlingConsignment.quantityGiven) {
-      alert(`La suma de vendidos (${sold}) y devueltos (${returned}) supera lo entregado (${settlingConsignment.quantityGiven}).`);
+    // Sólo se rinde lo pendiente (lo que la asociada ya registró como vendido no se vuelve a contar)
+    const pendingNow =
+      settlingConsignment.quantityGiven - settlingConsignment.quantitySold - settlingConsignment.quantityReturned;
+    if (sold + returned > pendingNow) {
+      alert(`La suma de vendidos (${sold}) y devueltos (${returned}) supera lo pendiente de rendición (${pendingNow}).`);
       return;
     }
 
@@ -1742,7 +1751,9 @@ export default function PecadosPage() {
             ...c,
             quantitySold: c.quantitySold + sold,
             quantityReturned: c.quantityReturned + returned,
-            status: (sold + returned >= c.quantityGiven ? "settled" : "active") as "active" | "settled",
+            status: (c.quantitySold + sold + c.quantityReturned + returned >= c.quantityGiven ? "settled" : "active") as
+              | "active"
+              | "settled",
           }
         : c
     );
@@ -2984,6 +2995,11 @@ export default function PecadosPage() {
                                 <span className="text-blue-400 font-medium">Venta Directa</span>
                               )}
                             </span>
+                            {s.notes?.includes("mercadería en consignación") && (
+                              <span className="mt-1 block text-[10px] font-bold text-amber-300">
+                                📦 De su mercadería en consignación
+                              </span>
+                            )}
                             {s.resellerCode && (
                               <span className="mt-1 block text-[10px] font-bold text-amber-300">
                                 🏷️ Código <span className="font-mono">{s.resellerCode}</span> → {s.resellerName || "revendedora"}

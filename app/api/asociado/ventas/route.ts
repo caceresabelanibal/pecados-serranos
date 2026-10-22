@@ -42,20 +42,55 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Agregá al menos un producto." }, { status: 400 });
   }
 
+  // Cada ítem sale de su mercadería en consignación ("c:<id>") o del depósito de la tienda ("p:<id>")
   const wanted = new Map<string, number>();
   for (const it of rawItems) {
-    const id = typeof it?.productId === "string" ? it.productId : "";
+    const cid = typeof it?.consignmentId === "string" ? it.consignmentId : "";
+    const pid = typeof it?.productId === "string" ? it.productId : "";
+    const key = cid ? `c:${cid}` : pid ? `p:${pid}` : "";
     const qty = Number(it?.quantity);
-    if (!id || id.length > 64 || !Number.isInteger(qty) || qty < 1 || qty > MAX_QTY_PER_ITEM) {
+    if (!key || key.length > 70 || !Number.isInteger(qty) || qty < 1 || qty > MAX_QTY_PER_ITEM) {
       return NextResponse.json({ error: "Venta inválida." }, { status: 400 });
     }
-    wanted.set(id, (wanted.get(id) || 0) + qty);
+    wanted.set(key, (wanted.get(key) || 0) + qty);
   }
+  let fromConsignment = false;
 
   try {
     const sale = await prisma.$transaction(async (tx) => {
       const items: { productId: string; productSku: string; productTitle: string; quantity: number; unitPrice: number; subtotal: number }[] = [];
-      for (const [id, qty] of wanted) {
+      for (const [key, qty] of wanted) {
+        const id = key.slice(2);
+        if (key.startsWith("c:")) {
+          // Venta de su mercadería: se descuenta de lo que tiene en mano (el stock del depósito
+          // ya bajó al entregársela). Sólo consignaciones propias con unidades pendientes.
+          const n = await tx.$executeRaw`
+            UPDATE "PecadoConsignment"
+            SET "quantitySold" = "quantitySold" + ${qty},
+                "status" = CASE WHEN "quantitySold" + ${qty} + "quantityReturned" >= "quantityGiven" THEN 'settled' ELSE 'active' END,
+                "updatedAt" = NOW()
+            WHERE id = ${id} AND "resellerId" = ${reseller.id}
+              AND "quantityGiven" - "quantitySold" - "quantityReturned" >= ${qty}`;
+          const c = await tx.pecadoConsignment.findUnique({ where: { id } });
+          if (!c || c.resellerId !== reseller.id) throw new Error("NOT_FOUND");
+          if (n === 0) {
+            throw Object.assign(new Error("NO_STOCK"), {
+              title: `${c.productTitle} (tu mercadería)`,
+              stock: Math.max(0, c.quantityGiven - c.quantitySold - c.quantityReturned),
+            });
+          }
+          fromConsignment = true;
+          items.push({
+            productId: c.productId,
+            productSku: c.productSku,
+            productTitle: c.productTitle,
+            quantity: qty,
+            unitPrice: c.unitAgreedPrice,
+            subtotal: Math.round(c.unitAgreedPrice * qty * 100) / 100,
+          });
+          continue;
+        }
+
         const p = await tx.pecadoProduct.findUnique({ where: { id } });
         if (!p || !p.active || !isProductComplete(p)) throw new Error("NOT_FOUND");
         const upd = await tx.pecadoProduct.updateMany({
@@ -85,7 +120,12 @@ export async function POST(request: Request) {
           totalAmount: Math.round(items.reduce((t, i) => t + i.subtotal, 0) * 100) / 100,
           paymentMethod,
           status: "completed",
-          notes: [notes, isCashPriceMethod(paymentMethod) ? "Descuento por pago en efectivo (Precio Público FT)" : "", "Registrada por la asociada"]
+          notes: [
+            notes,
+            fromConsignment ? "Vendido de su mercadería en consignación" : "",
+            isCashPriceMethod(paymentMethod) ? "Descuento por pago en efectivo (Precio Público FT)" : "",
+            "Registrada por la asociada",
+          ]
             .filter(Boolean)
             .join(" | "),
           items: { create: items },

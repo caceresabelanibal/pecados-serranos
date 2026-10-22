@@ -20,6 +20,7 @@ export interface Product {
   
   // Stock y Control de Inventario
   stock: number; // Col 8: Cantidad en stock disponible
+  stockBase?: number; // Stock con el que el panel cargó el producto (para guardar sólo la diferencia)
   minStock?: number; // Alerta de stock mínimo
   
   // Precios de Venta al Público (Hoja1 VShop.xlsb)
