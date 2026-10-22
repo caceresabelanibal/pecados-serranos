@@ -58,7 +58,6 @@ import CashFlowTab, { type PricingPatch } from "@/app/components/CashFlowTab";
 import ImageZoom from "@/app/components/ImageZoom";
 import AsociadoPanel from "@/app/components/AsociadoPanel";
 import {
-  MULTIPLIER_OPTIONS,
   flujoDeCaja,
   formatMoney,
   isValidMultiplier,
@@ -611,7 +610,7 @@ export default function PecadosPage() {
       setImportSuccessBanner(
         `Se importaron con éxito ${totalUnits} unidades en ${selectedItems.length} artículos (${addedCount} nuevos y ${restockedCount} con stock sumado). Registrado en Historial de Compras ("${newPurchaseRecord.fileName}").` +
           (addedCount > 0
-            ? ` Los ${addedCount} artículos nuevos quedan INCOMPLETOS hasta que elijas el multiplicador y cargues el Precio Público FT: no se muestran en la tienda.`
+            ? ` Los ${addedCount} artículos nuevos quedan INCOMPLETOS hasta que cargues el multiplicador y el Precio Público FT: no se muestran en la tienda.`
             : "")
       );
     } catch (err: any) {
@@ -4631,27 +4630,24 @@ export default function PecadosPage() {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="text-[11px] text-zinc-300 font-bold block mb-1">Multiplicador de ganancia</label>
-                      <select
-                        value={isValidMultiplier(prodForm.multiplicadorGanancia) ? String(prodForm.multiplicadorGanancia) : ""}
+                      <input
+                        type="number"
+                        min={0.01}
+                        step="0.01"
+                        value={prodForm.multiplicadorGanancia || ""}
                         onChange={(e) => {
-                          const m = Number(e.target.value) || 0;
+                          const m = Math.max(0, Number(e.target.value.replace(",", ".")) || 0);
                           setProdForm({
                             ...prodForm,
                             multiplicadorGanancia: m,
                             gananciaSugerida: proveedorConIva(prodForm.costoSinIva) * m,
                           });
                         }}
+                        placeholder="Ej: 1.75"
                         className={`w-full px-3 py-1.5 rounded-xl bg-zinc-900 border text-xs font-mono focus:outline-none focus:border-red-500 ${
                           isValidMultiplier(prodForm.multiplicadorGanancia) ? "border-zinc-800 text-white" : "border-amber-600 text-amber-200"
                         }`}
-                      >
-                        <option value="">Elegir…</option>
-                        {MULTIPLIER_OPTIONS.map((m) => (
-                          <option key={m} value={String(m)}>
-                            x{m.toFixed(1)}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     </div>
                     <div>
                       <label className="text-[11px] text-rose-300 font-bold block mb-1">Ganancia ($)</label>
@@ -5407,7 +5403,7 @@ export default function PecadosPage() {
                                 required
                                 value={row.commissionPerUnit}
                                 onChange={(e) => update({ commissionPerUnit: e.target.value })}
-                                placeholder="$ obligatorio"
+                                placeholder="$"
                                 className={`w-full px-2 py-1.5 rounded-lg bg-zinc-900 border text-white font-mono ${
                                   missingCommission ? "border-amber-600" : "border-zinc-800"
                                 }`}

@@ -4,7 +4,7 @@ import React, { useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { AlertTriangle, CheckCircle2, Edit3, FileSpreadsheet, FileUp, Search, Wallet, X } from "lucide-react";
 import type { Product } from "@/app/products";
-import { MULTIPLIER_OPTIONS, flujoDeCaja, formatMoney, missingFields } from "@/lib/pricing";
+import { flujoDeCaja, formatMoney, missingFields } from "@/lib/pricing";
 import { buildSearchText, matchesSearch } from "@/lib/search";
 
 export type PricingPatch = Partial<Pick<Product, "costoSinIva" | "multiplicadorGanancia" | "stock" | "precioEfectivo">>;
@@ -327,21 +327,14 @@ export default function CashFlowTab({
                       <td className={`${td} text-amber-300`}>{formatMoney(c.proveedorConIva)}</td>
                       <td className="p-2">
                         <div className="flex items-center gap-1.5 justify-center">
-                          <select
-                            value={c.multiplicador ? String(c.multiplicador) : ""}
-                            onChange={(e) => onUpdateProduct(p.id, { multiplicadorGanancia: Number(e.target.value) || 0 })}
-                            className={`px-1.5 py-1 rounded-lg bg-zinc-950 border text-xs font-mono focus:outline-none focus:border-red-500 ${
-                              noMult ? "border-amber-600 text-amber-200" : "border-zinc-800 text-white"
-                            }`}
-                            title="Multiplicador sobre Proveedor con IVA"
-                          >
-                            <option value="">Elegir…</option>
-                            {MULTIPLIER_OPTIONS.map((m) => (
-                              <option key={m} value={String(m)}>
-                                x{m.toFixed(1)}
-                              </option>
-                            ))}
-                          </select>
+                          <div className="w-20 shrink-0" title="Multiplicador sobre Proveedor con IVA (ej: 1.5, 1.75, 2)">
+                            <NumberCell
+                              value={c.multiplicador}
+                              step="0.01"
+                              invalid={noMult}
+                              onCommit={(v) => onUpdateProduct(p.id, { multiplicadorGanancia: v })}
+                            />
+                          </div>
                           <span className="font-mono text-rose-300 whitespace-nowrap">{formatMoney(c.ganancia)}</span>
                         </div>
                       </td>

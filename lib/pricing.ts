@@ -11,10 +11,11 @@
 // Este módulo lo usan tanto el navegador como el servidor.
 // -------------------------------------------------------------
 
-export const MULTIPLIER_OPTIONS = [1.5, 1.6, 1.7, 1.8, 2.0, 4.0];
+// Multiplicador de ganancia: lo carga el admin a mano (cualquier número mayor que 0, ej: 1.5, 1.75, 2.3)
+export const MAX_MULTIPLIER = 100;
 
 export function isValidMultiplier(m: unknown): m is number {
-  return typeof m === "number" && MULTIPLIER_OPTIONS.some((o) => Math.abs(o - m) < 1e-9);
+  return typeof m === "number" && Number.isFinite(m) && m > 0 && m <= MAX_MULTIPLIER;
 }
 
 export function proveedorConIva(sinIva: number): number {
