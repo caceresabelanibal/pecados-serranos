@@ -2063,7 +2063,8 @@ export default function PecadosPage() {
         </div>
       )}
 
-      {/* Main Store Header */}
+      {/* Main Store Header (en modo admin no se muestra: la barra del panel ya tiene "Salir") */}
+      {!isAdmin && (
       <header className="relative z-40 w-full border-b border-red-950/40 bg-black/75 backdrop-blur-md sticky top-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-end gap-4">
           <div className="flex items-center gap-2.5 sm:gap-3">
@@ -2114,6 +2115,7 @@ export default function PecadosPage() {
           </div>
         </div>
       </header>
+      )}
 
       {/* Main Content Area */}
       <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-8 md:py-12">
@@ -2212,22 +2214,22 @@ export default function PecadosPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
-              <div className="p-4 rounded-2xl bg-zinc-900/80 border border-zinc-800">
-                <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider block">Unidades totales</span>
+            <div className="grid grid-cols-3 gap-2 sm:gap-4">
+              <div className="p-3 sm:p-4 rounded-2xl bg-zinc-900/80 border border-zinc-800">
+                <span className="text-[10px] sm:text-[11px] font-semibold text-zinc-400 uppercase sm:tracking-wider block leading-tight">Unidades totales</span>
                 <span className="text-2xl sm:text-3xl font-black text-white mt-1 block font-mono">{totalStockUnits}</span>
               </div>
-              <div className="p-4 rounded-2xl bg-zinc-900/80 border border-zinc-800">
-                <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider block">Sin stock</span>
+              <div className="p-3 sm:p-4 rounded-2xl bg-zinc-900/80 border border-zinc-800">
+                <span className="text-[10px] sm:text-[11px] font-semibold text-zinc-400 uppercase sm:tracking-wider block leading-tight">Sin stock</span>
                 <span className="text-2xl sm:text-3xl font-black text-red-400 mt-1 block font-mono">{outOfStockCount}</span>
               </div>
               <button
                 type="button"
                 onClick={() => setAdminTab("cashflow")}
-                className="p-4 rounded-2xl bg-zinc-900/80 border border-zinc-800 text-left hover:border-amber-700 transition-colors cursor-pointer"
+                className="p-3 sm:p-4 rounded-2xl bg-zinc-900/80 border border-zinc-800 text-left hover:border-amber-700 transition-colors cursor-pointer"
                 title="Completar en Flujo de caja"
               >
-                <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider block">Incompletos</span>
+                <span className="text-[10px] sm:text-[11px] font-semibold text-zinc-400 uppercase sm:tracking-wider block leading-tight">Incompletos</span>
                 <span className="text-2xl sm:text-3xl font-black text-amber-400 mt-1 block font-mono">{incompleteProductsCount}</span>
               </button>
             </div>
@@ -2405,7 +2407,7 @@ export default function PecadosPage() {
                 <div className="text-[11px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
                   <Boxes className="w-3.5 h-3.5 text-blue-400" /> Unidades Compradas
                 </div>
-                <div className="text-2xl font-black text-blue-300 mt-1">
+                <div className="text-lg sm:text-2xl font-black text-blue-300 mt-1 break-words">
                   {purchases.reduce((acc, p) => acc + (p.totalUnits || 0), 0)} u.
                 </div>
                 <div className="text-[11px] text-zinc-500 mt-0.5">Ingresadas al stock</div>
@@ -2414,7 +2416,7 @@ export default function PecadosPage() {
                 <div className="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
                   <DollarSign className="w-3.5 h-3.5 text-amber-400" /> Inversión Neta (s/IVA)
                 </div>
-                <div className="text-2xl font-black text-amber-300 mt-1">
+                <div className="text-lg sm:text-2xl font-black text-amber-300 mt-1 break-words">
                   ${purchases.reduce((acc, p) => acc + (p.totalCostSinIva || 0), 0).toLocaleString("es-AR")}
                 </div>
                 <div className="text-[11px] text-zinc-500 mt-0.5">Costo base mercadería</div>
@@ -2423,7 +2425,7 @@ export default function PecadosPage() {
                 <div className="text-[11px] font-bold text-red-400 uppercase tracking-wider flex items-center gap-1.5">
                   <DollarSign className="w-3.5 h-3.5 text-red-400" /> Inversión Total (c/IVA)
                 </div>
-                <div className="text-2xl font-black text-red-300 mt-1">
+                <div className="text-lg sm:text-2xl font-black text-red-300 mt-1 break-words">
                   ${purchases.reduce((acc, p) => acc + (p.totalCostConIva || 0), 0).toLocaleString("es-AR")}
                 </div>
                 <div className="text-[11px] text-zinc-500 mt-0.5">Total abonado proveedor</div>
@@ -2432,7 +2434,7 @@ export default function PecadosPage() {
                 <div className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
                   <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> Venta Proyectada
                 </div>
-                <div className="text-2xl font-black text-emerald-300 mt-1">
+                <div className="text-lg sm:text-2xl font-black text-emerald-300 mt-1 break-words">
                   ${purchases.reduce((acc, p) => acc + (p.totalSaleEstimated || 0), 0).toLocaleString("es-AR")}
                 </div>
                 <div className="text-[11px] text-emerald-500 mt-0.5">
@@ -3479,13 +3481,13 @@ export default function PecadosPage() {
               className="absolute inset-0 bg-black/80 backdrop-blur-sm"
             />
 
-            <div className="fixed inset-y-0 right-0 max-w-full flex pl-10">
+            <div className="fixed inset-y-0 right-0 flex w-full sm:w-auto sm:max-w-full sm:pl-10">
               <motion.div
                 initial={{ x: "100%" }}
                 animate={{ x: 0 }}
                 exit={{ x: "100%" }}
                 transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                className="w-screen max-w-md bg-[#11090a] border-l border-red-950/60 flex flex-col shadow-2xl text-zinc-100"
+                className="w-full sm:w-screen sm:max-w-md h-full bg-[#11090a] sm:border-l border-red-950/60 flex flex-col shadow-2xl text-zinc-100"
               >
                 {/* Header */}
                 <div className="p-5 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/50">
@@ -3558,21 +3560,21 @@ export default function PecadosPage() {
                           </div>
 
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex flex-wrap items-center gap-1">
                               {item.product.sku && (
-                                <span className="font-mono text-[9px] text-red-400 bg-red-950/60 px-1 rounded">
+                                <span className="font-mono text-[9px] text-red-400 bg-red-950/60 px-1 rounded whitespace-nowrap">
                                   #{item.product.sku}
                                 </span>
                               )}
                               {item.product.tipo && (
-                                <span className="text-[9px] text-zinc-400 bg-zinc-800 px-1 rounded truncate max-w-[100px]">
+                                <span className="text-[9px] text-zinc-400 bg-zinc-800 px-1 rounded truncate max-w-[120px]">
                                   {item.product.tipo}
                                 </span>
                               )}
-                              <h4 className="text-xs font-bold text-white truncate">
-                                {item.product.title}
-                              </h4>
                             </div>
+                            <h4 className="mt-0.5 text-xs font-bold text-white leading-snug line-clamp-2" title={item.product.title}>
+                              {item.product.title}
+                            </h4>
                             {item.interest ? (
                               <p className="text-[11px] text-amber-300/90 mt-0.5">
                                 Sin stock · {item.quantity} {item.quantity === 1 ? "unidad" : "unidades"} de interés
