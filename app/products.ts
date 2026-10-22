@@ -60,7 +60,7 @@ export interface Sale {
   resellerName?: string;
   items: SaleItem[];
   totalAmount: number;
-  paymentMethod: "efectivo" | "transferencia" | "mercadopago" | "otro";
+  paymentMethod: PaymentMethod;
   status: "completed" | "pending" | "cancelled";
   notes?: string;
 }
@@ -269,4 +269,26 @@ export interface PurchasePlanItem {
   costoSinIva: number;
   image: string;
   fromInterest: boolean;
+}
+
+// Medios de pago de ventas y rendiciones
+export type PaymentMethod = "efectivo" | "transferencia" | "mercadopago" | "tarjeta" | "otro";
+
+export const PAYMENT_METHOD_OPTIONS: { value: PaymentMethod; label: string }[] = [
+  { value: "efectivo", label: "Efectivo" },
+  { value: "transferencia", label: "Transferencia Bancaria" },
+  { value: "mercadopago", label: "Mercado Pago" },
+  { value: "tarjeta", label: "Tarjeta de Crédito" },
+  { value: "otro", label: "Otro" },
+];
+
+export const PAYMENT_METHOD_LABELS: Record<string, string> = Object.fromEntries(
+  PAYMENT_METHOD_OPTIONS.map((o) => [o.value, o.label])
+);
+
+// Venta manual: efectivo, transferencia y Mercado Pago tienen 10% de descuento sobre el precio de la tienda;
+// tarjeta de crédito (y "otro") se cobran al precio de la tienda sin descuento.
+export const PAYMENT_DISCOUNT_RATE = 0.1;
+export function paymentDiscountRate(method: PaymentMethod): number {
+  return method === "efectivo" || method === "transferencia" || method === "mercadopago" ? PAYMENT_DISCOUNT_RATE : 0;
 }

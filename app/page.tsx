@@ -90,6 +90,10 @@ import {
   calcularMargenReal,
   calcularPorcentajeMargen,
   PRODUCT_TYPES_PRESETS,
+  PAYMENT_METHOD_OPTIONS,
+  PAYMENT_METHOD_LABELS,
+  paymentDiscountRate,
+  type PaymentMethod,
 } from "./products";
 
 export default function PecadosPage() {
@@ -168,7 +172,7 @@ export default function PecadosPage() {
     channel: "web_whatsapp" | "direct_sale" | "reseller";
     resellerId: string;
     items: { productId: string; quantity: number }[];
-    paymentMethod: "efectivo" | "transferencia" | "mercadopago" | "otro";
+    paymentMethod: PaymentMethod;
     notes: string;
   }>({
     buyerName: "",
@@ -206,7 +210,7 @@ export default function PecadosPage() {
   const [settleForm, setSettleForm] = useState({
     quantitySold: 0,
     quantityReturned: 0,
-    paymentMethod: "efectivo" as const,
+    paymentMethod: "efectivo" as PaymentMethod,
   });
 
   // Sales date filter
@@ -1626,6 +1630,12 @@ export default function PecadosPage() {
     setSettlingConsignment(null);
   };
 
+  // Precio unitario de la venta manual según el medio de pago
+  const manualSaleUnitPrice = (prod: Product, method: PaymentMethod) => {
+    const base = getItemUnitPrice(prod);
+    return Math.round(base * (1 - paymentDiscountRate(method)) * 100) / 100;
+  };
+
   // Manual Sale Handler
   const handleCreateManualSale = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1638,21 +1648,30 @@ export default function PecadosPage() {
     let total = 0;
     let updatedProducts = [...products];
 
-    for (const item of saleForm.items) {
-      const prod = products.find((p) => p.id === item.productId);
-      if (!prod) continue;
-      if (item.quantity > prod.stock) {
+    // Stock suficiente considerando el mismo producto en varias líneas
+    const qtyByProduct = new Map<string, number>();
+    for (const item of saleForm.items) qtyByProduct.set(item.productId, (qtyByProduct.get(item.productId) || 0) + item.quantity);
+    for (const [productId, qty] of qtyByProduct) {
+      const prod = products.find((p) => p.id === productId);
+      if (prod && qty > prod.stock) {
         alert(`No hay suficiente stock para "${prod.title}". Stock disponible: ${prod.stock}`);
         return;
       }
-      const subtotal = prod.price * item.quantity;
+    }
+
+    for (const item of saleForm.items) {
+      const prod = products.find((p) => p.id === item.productId);
+      if (!prod) continue;
+      // Precio de la tienda (TC) con 10% de descuento en efectivo / transferencia / Mercado Pago
+      const unitPrice = manualSaleUnitPrice(prod, saleForm.paymentMethod);
+      const subtotal = Math.round(unitPrice * item.quantity * 100) / 100;
       total += subtotal;
       saleItems.push({
         productId: prod.id,
         productSku: prod.sku || "S/C",
         productTitle: prod.title,
         quantity: item.quantity,
-        unitPrice: prod.price,
+        unitPrice,
         subtotal,
       });
 
@@ -1673,10 +1692,15 @@ export default function PecadosPage() {
       resellerId: resellerObj?.id,
       resellerName: resellerObj?.name,
       items: saleItems,
-      totalAmount: total,
+      totalAmount: Math.round(total * 100) / 100,
       paymentMethod: saleForm.paymentMethod,
       status: "completed",
-      notes: saleForm.notes.trim(),
+      notes: [
+        saleForm.notes.trim(),
+        paymentDiscountRate(saleForm.paymentMethod) > 0 ? "Descuento 10% por medio de pago" : "",
+      ]
+        .filter(Boolean)
+        .join(" | "),
     };
 
     persistAllData(updatedProducts, [newSale, ...sales], resellers, consignments);
@@ -1733,7 +1757,7 @@ export default function PecadosPage() {
         `"${itemsSummary.replace(/"/g, '""')}"`,
         s.items.reduce((sum, i) => sum + i.quantity, 0),
         s.totalAmount,
-        s.paymentMethod.toUpperCase(),
+        (PAYMENT_METHOD_LABELS[s.paymentMethod] || s.paymentMethod).toUpperCase(),
         `"${(s.notes || "").replace(/"/g, '""')}"`,
       ];
     });
@@ -2694,7 +2718,10 @@ export default function PecadosPage() {
                       buyerPhone: "",
                       channel: "direct_sale",
                       resellerId: "",
-                      items: products.length > 0 ? [{ productId: products[0].id, quantity: 1 }] : [],
+                      items: (() => {
+                        const first = products.find((p) => p.stock > 0) || products[0];
+                        return first ? [{ productId: first.id, quantity: 1 }] : [];
+                      })(),
                       paymentMethod: "efectivo",
                       notes: "",
                     });
@@ -2831,7 +2858,7 @@ export default function PecadosPage() {
                             </div>
                           </td>
                           <td className="p-3.5 uppercase text-zinc-400 font-medium text-[10px]">
-                            {s.paymentMethod}
+                            {PAYMENT_METHOD_LABELS[s.paymentMethod] || s.paymentMethod}
                           </td>
                           <td className="p-3.5 text-right font-black text-sm text-emerald-400 font-mono">
                             ${s.totalAmount.toLocaleString("es-AR")}
@@ -4516,14 +4543,18 @@ export default function PecadosPage() {
                     <label className="text-zinc-400 font-medium block mb-1">Medio de Pago</label>
                     <select
                       value={saleForm.paymentMethod}
-                      onChange={(e) => setSaleForm({ ...saleForm, paymentMethod: e.target.value as any })}
+                      onChange={(e) => setSaleForm({ ...saleForm, paymentMethod: e.target.value as PaymentMethod })}
                       className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white"
                     >
-                      <option value="efectivo">Efectivo</option>
-                      <option value="transferencia">Transferencia Bancaria</option>
-                      <option value="mercadopago">Mercado Pago</option>
-                      <option value="otro">Otro</option>
+                      {PAYMENT_METHOD_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
                     </select>
+                    <span className="mt-1 block text-[10px] text-zinc-500">
+                      {paymentDiscountRate(saleForm.paymentMethod) > 0 ? "10% de descuento sobre el precio de la tienda" : "Precio de la tienda, sin descuento"}
+                    </span>
                   </div>
                 </div>
 
@@ -4538,7 +4569,8 @@ export default function PecadosPage() {
                       <option value="">Seleccionar...</option>
                       {resellers.map((r) => (
                         <option key={r.id} value={r.id}>
-                          {r.name} ({r.zone}) - {r.commissionPercent}% com.
+                          {r.name}
+                          {r.zone ? ` — ${r.zone}` : ""}
                         </option>
                       ))}
                     </select>
@@ -4564,56 +4596,112 @@ export default function PecadosPage() {
                   </div>
 
                   <div className="space-y-2">
+                    {saleForm.items.length === 0 && (
+                      <p className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-zinc-500 text-center">
+                        Agregá al menos un producto.
+                      </p>
+                    )}
                     {saleForm.items.map((item, idx) => {
                       const selProd = products.find((p) => p.id === item.productId);
+                      const unit = selProd ? manualSaleUnitPrice(selProd, saleForm.paymentMethod) : 0;
+                      const updateItem = (patch: Partial<{ productId: string; quantity: number }>) => {
+                        const newItems = saleForm.items.map((it, i) => (i === idx ? { ...it, ...patch } : it));
+                        setSaleForm({ ...saleForm, items: newItems });
+                      };
                       return (
-                        <div key={idx} className="flex items-center gap-2 bg-zinc-950 p-2 rounded-xl border border-zinc-800">
-                          <select
-                            value={item.productId}
-                            onChange={(e) => {
-                              const newItems = [...saleForm.items];
-                              newItems[idx].productId = e.target.value;
-                              setSaleForm({ ...saleForm, items: newItems });
-                            }}
-                            className="flex-1 bg-zinc-900 border border-zinc-800 p-1.5 rounded-lg text-white text-xs"
-                          >
-                            {products.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                [{p.sku}] {p.title} (${p.price.toLocaleString("es-AR")}) - Stock: {p.stock}
-                              </option>
-                            ))}
-                          </select>
+                        <div
+                          key={idx}
+                          className="grid grid-cols-[minmax(0,1fr)_76px_auto] sm:grid-cols-[minmax(0,1fr)_110px_76px_auto] gap-2 items-end bg-zinc-950 p-2.5 rounded-xl border border-zinc-800"
+                        >
+                          {/* Producto (sólo el nombre) */}
+                          <div className="col-span-3 sm:col-span-1 min-w-0">
+                            <label className="text-[10px] text-zinc-500 block mb-0.5">Producto</label>
+                            <select
+                              value={item.productId}
+                              onChange={(e) => updateItem({ productId: e.target.value, quantity: 1 })}
+                              className="w-full min-w-0 bg-zinc-900 border border-zinc-800 px-2 py-1.5 rounded-lg text-white text-xs truncate"
+                            >
+                              {products.map((p) => (
+                                <option key={p.id} value={p.id} disabled={p.stock <= 0}>
+                                  {p.title}
+                                  {p.stock <= 0 ? " (sin stock)" : ""}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
 
-                          <div className="flex items-center gap-1">
-                            <span className="text-zinc-500 text-[10px]">Cant:</span>
+                          {/* Monto unitario según el medio de pago */}
+                          <div className="min-w-0">
+                            <label className="text-[10px] text-zinc-500 block mb-0.5">Monto c/u</label>
+                            <div className="px-2 py-1.5 rounded-lg bg-zinc-900/60 border border-zinc-800 text-white font-mono text-xs truncate">
+                              {formatMoney(unit)}
+                            </div>
+                          </div>
+
+                          {/* Cantidad */}
+                          <div>
+                            <label className="text-[10px] text-zinc-500 block mb-0.5">Cantidad</label>
                             <input
                               type="number"
                               min={1}
-                              max={selProd?.stock || 999}
+                              max={selProd?.stock || 1}
                               value={item.quantity}
-                              onChange={(e) => {
-                                const newItems = [...saleForm.items];
-                                newItems[idx].quantity = Math.max(1, Number(e.target.value));
-                                setSaleForm({ ...saleForm, items: newItems });
-                              }}
-                              className="w-14 px-2 py-1 rounded bg-zinc-900 border border-zinc-800 text-white font-mono text-center"
+                              onChange={(e) =>
+                                updateItem({ quantity: Math.min(Math.max(1, Number(e.target.value) || 1), Math.max(1, selProd?.stock || 1)) })
+                              }
+                              className="w-full px-2 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-white font-mono text-center text-xs"
                             />
                           </div>
 
                           <button
                             type="button"
-                            onClick={() => {
-                              const newItems = saleForm.items.filter((_, i) => i !== idx);
-                              setSaleForm({ ...saleForm, items: newItems });
-                            }}
-                            className="p-1 text-zinc-500 hover:text-red-400"
+                            onClick={() => setSaleForm({ ...saleForm, items: saleForm.items.filter((_, i) => i !== idx) })}
+                            className="p-2 mb-0.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-zinc-900"
+                            title="Quitar producto"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
+
+                          {selProd && (
+                            <p className="col-span-3 sm:col-span-4 text-[10px] text-zinc-500">
+                              Stock disponible: {selProd.stock} · Subtotal:{" "}
+                              <span className="text-zinc-300 font-mono">{formatMoney(unit * item.quantity)}</span>
+                            </p>
+                          )}
                         </div>
                       );
                     })}
                   </div>
+
+                  {saleForm.items.length > 0 &&
+                    (() => {
+                      const lista = saleForm.items.reduce((t, it) => {
+                        const p = products.find((x) => x.id === it.productId);
+                        return t + (p ? getItemUnitPrice(p) * it.quantity : 0);
+                      }, 0);
+                      const total = saleForm.items.reduce((t, it) => {
+                        const p = products.find((x) => x.id === it.productId);
+                        return t + (p ? manualSaleUnitPrice(p, saleForm.paymentMethod) * it.quantity : 0);
+                      }, 0);
+                      return (
+                        <div className="mt-3 p-3 rounded-xl bg-zinc-950 border border-zinc-800 space-y-1">
+                          <div className="flex justify-between text-zinc-400">
+                            <span>Precio de la tienda</span>
+                            <span className="font-mono">{formatMoney(lista)}</span>
+                          </div>
+                          {lista - total > 0.005 && (
+                            <div className="flex justify-between text-emerald-400">
+                              <span>Descuento 10% ({PAYMENT_METHOD_LABELS[saleForm.paymentMethod]})</span>
+                              <span className="font-mono">−{formatMoney(lista - total)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between text-white font-bold text-sm pt-1 border-t border-zinc-800">
+                            <span>Total</span>
+                            <span className="font-mono">{formatMoney(total)}</span>
+                          </div>
+                        </div>
+                      );
+                    })()}
                 </div>
 
                 <div className="pt-3 border-t border-zinc-800 flex items-center justify-end gap-2">
@@ -4936,13 +5024,14 @@ export default function PecadosPage() {
                   <label className="text-zinc-400 font-medium block mb-1">Medio de Pago Rendido</label>
                   <select
                     value={settleForm.paymentMethod}
-                    onChange={(e) => setSettleForm({ ...settleForm, paymentMethod: e.target.value as any })}
+                    onChange={(e) => setSettleForm({ ...settleForm, paymentMethod: e.target.value as PaymentMethod })}
                     className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white"
                   >
-                    <option value="efectivo">Efectivo</option>
-                    <option value="transferencia">Transferencia Bancaria</option>
-                    <option value="mercadopago">Mercado Pago</option>
-                    <option value="otro">Otro</option>
+                    {PAYMENT_METHOD_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
