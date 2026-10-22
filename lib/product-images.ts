@@ -99,6 +99,17 @@ export async function getStoredImage(sku: string): Promise<StoredImage | null> {
   return row ? { mime: row.mime, data: Buffer.from(row.data), sourceUrl: row.sourceUrl } : null;
 }
 
+// Foto original (máxima resolución) para el zoom; si no hay original se usa la versión web
+export async function getStoredOriginal(sku: string): Promise<{ mime: string; data: Buffer } | null> {
+  const row = await prisma.pecadoProductImage.findUnique({ where: { sku }, select: { mime: true, data: true, original: true, sourceUrl: true } });
+  if (!row) return null;
+  if (!row.original) return { mime: row.mime, data: Buffer.from(row.data) };
+  const data = Buffer.from(row.original);
+  const ext = row.sourceUrl.toLowerCase();
+  const mime = ext.endsWith(".png") ? "image/png" : ext.endsWith(".webp") ? "image/webp" : "image/jpeg";
+  return { mime, data };
+}
+
 // Busca la foto de un producto existente: base -> proveedor -> archivo local. Lo encontrado queda guardado.
 export async function resolveProductImage(sku: string, opts: { force?: boolean } = {}): Promise<StoredImage | null> {
   if (!SKU_PATTERN.test(sku)) return null;

@@ -4,7 +4,7 @@ import fs from "fs";
 import path from "path";
 import { isAdminRequest, isSameOriginJson } from "@/lib/auth";
 import { SKU_PATTERN } from "@/lib/pricing";
-import { getStoredImage, productImageUrl, resolveProductImage, saveDataUriImage } from "@/lib/product-images";
+import { getStoredImage, getStoredOriginal, productImageUrl, resolveProductImage, saveDataUriImage } from "@/lib/product-images";
 
 const ALLOWED_IMAGE = /^data:(image\/(?:png|jpeg|jpg|webp|gif));base64,([A-Za-z0-9+/=]+)$/;
 const MAX_IMAGE_CHARS = 8 * 1024 * 1024; // ~6 MB de imagen
@@ -33,9 +33,10 @@ function isExternalCustomUrl(image: string | null | undefined): boolean {
 // GET /api/pecados/imagen/[sku]
 // Foto del producto guardada en PostgreSQL. Si todavía no está, se descarga del proveedor
 // (o se toma el archivo local), se guarda en la base y se sirve.
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ sku: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ sku: string }> }) {
   const { sku } = await params;
   const cleanSku = decodeURIComponent(sku).trim().toUpperCase();
+  const wantsOriginal = request.nextUrl.searchParams.get("size") === "original";
 
   if (SKU_PATTERN.test(cleanSku)) {
     try {
@@ -44,6 +45,12 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
       // URL externa elegida a mano por el administrador
       if (isExternalCustomUrl(product?.image)) {
         return NextResponse.redirect(product!.image as string, { status: 307 });
+      }
+
+      // ?size=original: máxima resolución (zoom con lupa en la tienda)
+      if (wantsOriginal) {
+        const original = await getStoredOriginal(cleanSku);
+        if (original) return imageResponse(original.data, original.mime);
       }
 
       const stored = await getStoredImage(cleanSku);

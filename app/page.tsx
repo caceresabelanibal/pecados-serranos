@@ -50,9 +50,11 @@ import {
   HandHeart,
   Wallet,
   AlertTriangle,
+  ZoomIn,
 } from "lucide-react";
 import InterestsTab from "@/app/components/InterestsTab";
 import CashFlowTab, { type PricingPatch } from "@/app/components/CashFlowTab";
+import ImageZoom from "@/app/components/ImageZoom";
 import {
   MULTIPLIER_OPTIONS,
   flujoDeCaja,
@@ -92,7 +94,7 @@ import {
   PRODUCT_TYPES_PRESETS,
   PAYMENT_METHOD_OPTIONS,
   PAYMENT_METHOD_LABELS,
-  paymentDiscountRate,
+  isCashPriceMethod,
   type PaymentMethod,
 } from "./products";
 
@@ -887,6 +889,8 @@ export default function PecadosPage() {
   const [orderSuccess, setOrderSuccess] = useState(false);
   // Producto sin stock pendiente de confirmar "Me interesa" (modal de aviso)
   const [interestConfirmProduct, setInterestConfirmProduct] = useState<Product | null>(null);
+  // Foto ampliada con lupa (tienda)
+  const [zoomProduct, setZoomProduct] = useState<Product | null>(null);
   // Aviso temporal al agregar un producto con stock (el carrito no se abre)
   const [cartToast, setCartToast] = useState<{ title: string; qty: number } | null>(null);
   const cartToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1632,8 +1636,9 @@ export default function PecadosPage() {
 
   // Precio unitario de la venta manual según el medio de pago
   const manualSaleUnitPrice = (prod: Product, method: PaymentMethod) => {
-    const base = getItemUnitPrice(prod);
-    return Math.round(base * (1 - paymentDiscountRate(method)) * 100) / 100;
+    // Efectivo / transferencia / Mercado Pago: Precio Público FT. Tarjeta y otros: Precio Público TC.
+    if (isCashPriceMethod(method) && prod.precioEfectivo && prod.precioEfectivo > 0) return prod.precioEfectivo;
+    return getItemUnitPrice(prod);
   };
 
   // Manual Sale Handler
@@ -1662,7 +1667,7 @@ export default function PecadosPage() {
     for (const item of saleForm.items) {
       const prod = products.find((p) => p.id === item.productId);
       if (!prod) continue;
-      // Precio de la tienda (TC) con 10% de descuento en efectivo / transferencia / Mercado Pago
+      // Precio Público FT en efectivo / transferencia / Mercado Pago; TC con tarjeta
       const unitPrice = manualSaleUnitPrice(prod, saleForm.paymentMethod);
       const subtotal = Math.round(unitPrice * item.quantity * 100) / 100;
       total += subtotal;
@@ -1697,7 +1702,7 @@ export default function PecadosPage() {
       status: "completed",
       notes: [
         saleForm.notes.trim(),
-        paymentDiscountRate(saleForm.paymentMethod) > 0 ? "Descuento 10% por medio de pago" : "",
+        isCashPriceMethod(saleForm.paymentMethod) ? "Descuento por pago en efectivo (Precio Público FT)" : "",
       ]
         .filter(Boolean)
         .join(" | "),
@@ -3315,7 +3320,12 @@ export default function PecadosPage() {
                     >
                       {/* Image container: aspect-square, object-contain para evitar pixelado */}
                       <div className="relative aspect-square w-full bg-gradient-to-b from-zinc-950/70 via-zinc-900/40 to-zinc-950 p-2 sm:p-2.5 overflow-hidden flex items-center justify-center">
-                        <div className="relative w-full h-full flex items-center justify-center">
+                        <button
+                          type="button"
+                          onClick={() => setZoomProduct(product)}
+                          className="relative w-full h-full flex items-center justify-center cursor-zoom-in"
+                          aria-label={`Ampliar foto de ${product.title}`}
+                        >
                           <Image
                             src={product.image || "/pecados/auriculares.jpg"}
                             alt={product.title}
@@ -3324,7 +3334,12 @@ export default function PecadosPage() {
                             unoptimized={true}
                             className="object-contain p-1 group-hover:scale-105 transition-transform duration-300 drop-shadow-md select-none"
                           />
-                        </div>
+                          {!isAdmin && (
+                            <span className="absolute bottom-1.5 right-1.5 p-1.5 rounded-full bg-black/70 text-white border border-zinc-700 shadow-md">
+                              <ZoomIn className="w-3.5 h-3.5" />
+                            </span>
+                          )}
+                        </button>
 
                         {/* SKU Badge & Stock Badges */}
                         <div className="absolute top-2 left-2 flex flex-col gap-1 z-10">
@@ -3717,6 +3732,21 @@ export default function PecadosPage() {
               </motion.div>
             </div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* Foto ampliada con lupa */}
+      <AnimatePresence>
+        {zoomProduct && (
+          <ImageZoom
+            key={zoomProduct.id}
+            src={zoomProduct.image || "/pecados/auriculares.jpg"}
+            zoomSrc={
+              zoomProduct.image?.startsWith("/api/pecados/imagen/") ? `${zoomProduct.image}?size=original` : zoomProduct.image
+            }
+            alt={zoomProduct.title}
+            onClose={() => setZoomProduct(null)}
+          />
         )}
       </AnimatePresence>
 
@@ -4553,7 +4583,7 @@ export default function PecadosPage() {
                       ))}
                     </select>
                     <span className="mt-1 block text-[10px] text-zinc-500">
-                      {paymentDiscountRate(saleForm.paymentMethod) > 0 ? "10% de descuento sobre el precio de la tienda" : "Precio de la tienda, sin descuento"}
+                      {isCashPriceMethod(saleForm.paymentMethod) ? "Se cobra el Precio Público FT (pago en efectivo)" : "Precio de la tienda (Precio Público TC), sin descuento"}
                     </span>
                   </div>
                 </div>
@@ -4703,7 +4733,7 @@ export default function PecadosPage() {
                           </div>
                           {lista - total > 0.005 && (
                             <div className="flex justify-between text-emerald-400">
-                              <span>Descuento 10% ({PAYMENT_METHOD_LABELS[saleForm.paymentMethod]})</span>
+                              <span>Descuento por pago en efectivo</span>
                               <span className="font-mono">−{formatMoney(lista - total)}</span>
                             </div>
                           )}

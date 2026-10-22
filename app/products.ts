@@ -286,9 +286,8 @@ export const PAYMENT_METHOD_LABELS: Record<string, string> = Object.fromEntries(
   PAYMENT_METHOD_OPTIONS.map((o) => [o.value, o.label])
 );
 
-// Venta manual: efectivo, transferencia y Mercado Pago tienen 10% de descuento sobre el precio de la tienda;
-// tarjeta de crédito (y "otro") se cobran al precio de la tienda sin descuento.
-export const PAYMENT_DISCOUNT_RATE = 0.1;
-export function paymentDiscountRate(method: PaymentMethod): number {
-  return method === "efectivo" || method === "transferencia" || method === "mercadopago" ? PAYMENT_DISCOUNT_RATE : 0;
+// Venta manual: efectivo, transferencia y Mercado Pago se cobran al Precio Público FT (precio en efectivo);
+// tarjeta de crédito (y "otro") al precio de la tienda, Precio Público TC.
+export function isCashPriceMethod(method: PaymentMethod): boolean {
+  return method === "efectivo" || method === "transferencia" || method === "mercadopago";
 }
