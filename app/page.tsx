@@ -4586,7 +4586,19 @@ export default function PecadosPage() {
                       onClick={() =>
                         setSaleForm({
                           ...saleForm,
-                          items: [...saleForm.items, { productId: products[0]?.id || "", quantity: 1 }],
+                          // Primer producto con stock que todavía no esté en la venta
+                          items: [
+                            ...saleForm.items,
+                            {
+                              productId:
+                                (
+                                  products.find((p) => p.stock > 0 && !saleForm.items.some((it) => it.productId === p.id)) ||
+                                  products.find((p) => p.stock > 0) ||
+                                  products[0]
+                                )?.id || "",
+                              quantity: 1,
+                            },
+                          ],
                         })
                       }
                       className="text-red-400 hover:text-red-300 text-[11px] font-bold"
