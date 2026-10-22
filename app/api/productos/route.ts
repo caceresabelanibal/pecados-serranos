@@ -589,7 +589,11 @@ export async function POST(request: Request) {
             if (image.startsWith("data:image/") && (await saveDataUriImage(cleanSku, image))) {
               image = productImageUrl(cleanSku);
             }
-            if (!image || image.includes("auriculares")) image = productImageUrl(cleanSku);
+            // Las fotos se sirven desde la base (tabla de imágenes); las rutas locales viejas o el
+            // placeholder no pueden pisarla (p. ej. un panel abierto con datos anteriores)
+            if (!image || image.includes("auriculares") || image.startsWith("/pecados/products/")) {
+              image = productImageUrl(cleanSku);
+            }
             await prisma.pecadoProduct.upsert({
               where: { sku: cleanSku },
               update: {
