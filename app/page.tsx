@@ -287,7 +287,8 @@ export default function PecadosPage() {
       const rawImp = findVal(["Imp.", "IVA", "Impuesto", "E", "e"]);
       const imp = parseFloat(String(rawImp).replace(/[^0-9.-]/g, "") || "0");
 
-      const rawCostoConIva = imp > 0 ? costoSinIva + imp : (costoSinIva > 0 ? Math.round(costoSinIva * 1.21) : 0);
+      // Costo de la factura (lo efectivamente pagado): P.U. + Imp. del Excel
+      const rawCostoConIva = imp > 0 ? costoSinIva + imp : proveedorConIva(costoSinIva);
 
       const rawDesc = findVal(["Descripcion", "Descripción", "Detalle", "Producto", "Titulo", "Título", "Nombre", "Comentarios", "G", "g"]);
       const rawImage = findVal(["Imagen", "Foto", "Image", "URL", "A", "a"]);
@@ -300,9 +301,10 @@ export default function PecadosPage() {
         restockCount++;
         const currentStock = existing.stock;
         const finalStock = currentStock + qty;
-        // El costo cargado en Flujo de caja manda; sólo se toma el del Excel si no había uno
-        const cSin = (existing.costoSinIva && existing.costoSinIva > 0 ? existing.costoSinIva : costoSinIva) || 0;
-        const cCon = proveedorConIva(cSin);
+        // Costo de esta factura (para el registro de la compra). El costo del producto en
+        // Flujo de caja no se modifica al confirmar.
+        const cSin = costoSinIva > 0 ? costoSinIva : existing.costoSinIva || 0;
+        const cCon = costoSinIva > 0 ? rawCostoConIva : proveedorConIva(cSin);
 
         totalUnits += qty;
         totalCostConIva += cCon * qty;
@@ -331,7 +333,7 @@ export default function PecadosPage() {
         const tipo = vshopMatch?.tipo || rawTipo || "Sex Shop";
         const category = vshopMatch?.category || rawTipo || "Sex Shop";
         const cSin = costoSinIva;
-        const cCon = proveedorConIva(cSin);
+        const cCon = rawCostoConIva;
         // Multiplicador y Precio Público FT los define el administrador en Flujo de caja
         const mult = 0;
         const precioEfectivo = 0;
@@ -466,9 +468,14 @@ export default function PecadosPage() {
           updatedProducts[existingIndex] = {
             ...existing,
             stock: finalStock,
-            costoSinIva: item.costoSinIva,
-            costoConIva: item.costoConIva,
-            costPrice: item.costoConIva,
+            // El costo de Flujo de caja manda; sólo se toma el de la factura si no había uno
+            costoSinIva: existing.costoSinIva && existing.costoSinIva > 0 ? existing.costoSinIva : item.costoSinIva,
+            costoConIva: proveedorConIva(
+              existing.costoSinIva && existing.costoSinIva > 0 ? existing.costoSinIva : item.costoSinIva
+            ),
+            costPrice: proveedorConIva(
+              existing.costoSinIva && existing.costoSinIva > 0 ? existing.costoSinIva : item.costoSinIva
+            ),
             image:
               (!existing.image || existing.image.includes("auriculares")) && item.image
                 ? item.image
@@ -510,10 +517,10 @@ export default function PecadosPage() {
             tipo: item.tipo,
             category: item.category,
             costoSinIva: item.costoSinIva,
-            costoConIva: item.costoConIva,
-            costPrice: item.costoConIva,
+            costoConIva: proveedorConIva(item.costoSinIva),
+            costPrice: proveedorConIva(item.costoSinIva),
             multiplicadorGanancia: item.multiplicador,
-            gananciaSugerida: item.costoConIva * item.multiplicador,
+            gananciaSugerida: proveedorConIva(item.costoSinIva) * item.multiplicador,
             precioEfectivo: item.precioEfectivo,
             price: item.precioEfectivo,
             precioTarjeta: item.precioTarjeta,
