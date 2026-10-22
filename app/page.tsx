@@ -57,6 +57,7 @@ import InterestsTab from "@/app/components/InterestsTab";
 import CashFlowTab, { type PricingPatch } from "@/app/components/CashFlowTab";
 import ImageZoom from "@/app/components/ImageZoom";
 import AsociadoPanel from "@/app/components/AsociadoPanel";
+import AgeGate from "@/app/components/AgeGate";
 import {
   flujoDeCaja,
   formatMoney,
@@ -2105,6 +2106,8 @@ export default function PecadosPage() {
 
   return (
     <div className="min-h-screen bg-[#0a0506] text-zinc-100 flex flex-col font-sans selection:bg-red-600 selection:text-white">
+      {/* Aviso de sitio para adultos (en cada visita nueva a la tienda) */}
+      {!isAdmin && <AgeGate />}
       {/* Background ambient fiery glow */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
         <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[700px] h-[450px] bg-red-600/15 rounded-full blur-[140px]" />
