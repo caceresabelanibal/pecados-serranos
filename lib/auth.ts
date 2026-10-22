@@ -159,3 +159,23 @@ export function rateLimit(key: string, limit: number, windowMs: number): { ok: b
 export function resetRateLimit(key: string) {
   buckets.delete(key);
 }
+
+// -------------------------------------------------------------
+// Hash de contraseñas (mismo formato que ADMIN_PASSWORD_HASH): scrypt:<saltHex>:<hashHex>
+// -------------------------------------------------------------
+export function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(password, salt, 64);
+  return `scrypt:${salt.toString("hex")}:${hash.toString("hex")}`;
+}
+
+export function verifyPasswordHash(password: unknown, stored: string | null | undefined): boolean {
+  if (typeof password !== "string" || password.length > 256 || !stored || !stored.startsWith("scrypt:")) return false;
+  const [, saltHex, hashHex] = stored.split(":");
+  const expected = Buffer.from(hashHex, "hex");
+  const actual = crypto.scryptSync(password, Buffer.from(saltHex, "hex"), expected.length);
+  return safeEqual(actual, expected);
+}
+
+// Hash "dummy" para igualar tiempos cuando el usuario no existe
+export const DUMMY_PASSWORD_HASH = hashPassword(crypto.randomBytes(16).toString("hex"));

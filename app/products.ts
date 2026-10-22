@@ -63,6 +63,7 @@ export interface Sale {
   paymentMethod: PaymentMethod;
   status: "completed" | "pending" | "cancelled";
   notes?: string;
+  resellerCode?: string; // Código de revendedora usado en la compra
 }
 
 export interface Reseller {
@@ -73,6 +74,9 @@ export interface Reseller {
   commissionPercent: number; // Porcentaje de comisión (%)
   notes?: string;
   createdAt: string;
+  code?: string; // Código propio que comparte con sus compradores
+  username?: string; // Usuario del perfil Asociado
+  hasPassword?: boolean; // Tiene contraseña asignada (acceso habilitado)
 }
 
 export interface Consignment {

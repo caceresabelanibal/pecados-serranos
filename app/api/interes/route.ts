@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getClientIp, isSameOriginJson, rateLimit } from "@/lib/auth";
 import { SKU_PATTERN, isProductComplete } from "@/lib/pricing";
+import { findResellerByCode, normalizeResellerCode } from "@/lib/reseller-auth";
 
 const MAX_ITEMS = 30;
 const MAX_QTY_PER_ITEM = 10;
@@ -47,6 +48,12 @@ export async function POST(request: Request) {
     wanted.set(sku, Math.min(MAX_QTY_PER_ITEM, (wanted.get(sku) || 0) + qty));
   }
 
+  // Código de revendedora (opcional): si se ingresa, tiene que existir
+  const resellerCode = normalizeResellerCode(body?.resellerCode);
+  if (resellerCode && !(await findResellerByCode(resellerCode))) {
+    return NextResponse.json({ error: "El código de revendedora no es válido." }, { status: 400 });
+  }
+
   try {
     const products = await prisma.pecadoProduct.findMany({
       where: { sku: { in: [...wanted.keys()] }, active: true },
@@ -62,7 +69,7 @@ export async function POST(request: Request) {
         productTitle: p.title,
         quantity: wanted.get(p.sku) || 1,
         buyerName: buyerName || "Cliente Web WhatsApp",
-        notes,
+        notes: [notes, resellerCode ? `Código de revendedora: ${resellerCode}` : ""].filter(Boolean).join(" | "),
       })),
     });
 

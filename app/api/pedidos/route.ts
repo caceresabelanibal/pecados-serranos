@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getClientIp, isSameOriginJson, rateLimit } from "@/lib/auth";
 import { SKU_PATTERN, isProductComplete, precioPublicoTC } from "@/lib/pricing";
+import { findResellerByCode, normalizeResellerCode } from "@/lib/reseller-auth";
 
 const MAX_ITEMS = 30;
 const MAX_QTY_PER_ITEM = 10;
@@ -50,6 +51,13 @@ export async function POST(request: Request) {
     wanted.set(sku, (wanted.get(sku) || 0) + qty);
   }
 
+  // Código de revendedora (opcional): si se ingresa, tiene que existir
+  const resellerCode = normalizeResellerCode(body?.resellerCode);
+  const codeOwner = resellerCode ? await findResellerByCode(resellerCode) : null;
+  if (resellerCode && !codeOwner) {
+    return NextResponse.json({ error: "El código de revendedora no es válido." }, { status: 400 });
+  }
+
   try {
     const sale = await prisma.$transaction(async (tx) => {
       const items: { productId: string; productSku: string; productTitle: string; quantity: number; unitPrice: number; subtotal: number }[] = [];
@@ -78,6 +86,9 @@ export async function POST(request: Request) {
         data: {
           buyerName: buyerName || "Cliente Web WhatsApp",
           channel: "web_whatsapp",
+          resellerId: codeOwner?.id ?? null,
+          resellerName: codeOwner?.name ?? null,
+          resellerCode: codeOwner?.code ?? null,
           totalAmount: items.reduce((s, i) => s + i.subtotal, 0),
           paymentMethod: "otro",
           status: "completed",

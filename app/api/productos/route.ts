@@ -297,11 +297,14 @@ async function getFullState() {
       }
 
       // 2. Obtener revendedores de PostgreSQL
+      // Sólo revendedores activos (los dados de baja se conservan para el historial)
       let dbResellers = await prisma.pecadoReseller.findMany({
+        where: { active: true },
         orderBy: { createdAt: "desc" },
       });
 
-      if (dbResellers.length === 0) {
+      // Ejemplo inicial sólo si la base nunca tuvo revendedores
+      if (dbResellers.length === 0 && (await prisma.pecadoReseller.count()) === 0) {
         for (const r of INITIAL_RESELLERS) {
           await prisma.pecadoReseller.create({
             data: {
@@ -314,6 +317,7 @@ async function getFullState() {
           });
         }
         dbResellers = await prisma.pecadoReseller.findMany({
+          where: { active: true },
           orderBy: { createdAt: "desc" },
         });
       }
@@ -360,6 +364,10 @@ async function getFullState() {
         commissionPercent: r.commissionPercent,
         notes: r.notes,
         createdAt: r.createdAt.toISOString(),
+        // Acceso al perfil Asociado (la contraseña nunca sale del servidor)
+        code: r.code || undefined,
+        username: r.username || undefined,
+        hasPassword: Boolean(r.passwordHash),
       }));
 
       const formattedSales: Sale[] = dbSales.map((s) => ({
@@ -374,6 +382,7 @@ async function getFullState() {
         paymentMethod: s.paymentMethod as any,
         status: s.status as any,
         notes: s.notes,
+        resellerCode: s.resellerCode || undefined,
         items: s.items.map((i) => ({
           productId: i.productId || "",
           productSku: i.productSku,

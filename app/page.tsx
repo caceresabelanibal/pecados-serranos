@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -51,10 +51,12 @@ import {
   Wallet,
   AlertTriangle,
   ZoomIn,
+  UserCheck,
 } from "lucide-react";
 import InterestsTab from "@/app/components/InterestsTab";
 import CashFlowTab, { type PricingPatch } from "@/app/components/CashFlowTab";
 import ImageZoom from "@/app/components/ImageZoom";
+import AsociadoPanel from "@/app/components/AsociadoPanel";
 import {
   MULTIPLIER_OPTIONS,
   flujoDeCaja,
@@ -195,6 +197,9 @@ export default function PecadosPage() {
     zone: "",
     commissionPercent: 15,
     notes: "",
+    code: "",
+    username: "",
+    password: "",
   });
 
   // Consignment Modal (Entregar mercadería para revender)
@@ -886,6 +891,39 @@ export default function PecadosPage() {
   // Client buyer info
   const [buyerName, setBuyerName] = useState("");
   const [buyerAddress, setBuyerAddress] = useState("");
+
+  // Código de revendedora en el carrito (opcional; si se ingresa debe ser válido)
+  const [cartCode, setCartCode] = useState("");
+  const [codeStatus, setCodeStatus] = useState<"idle" | "checking" | "valid" | "invalid">("idle");
+  useEffect(() => {
+    const c = cartCode.trim().toUpperCase();
+    if (!c) {
+      setCodeStatus("idle");
+      return;
+    }
+    setCodeStatus("checking");
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/codigo?c=${encodeURIComponent(c)}`, { cache: "no-store" });
+        const d = await r.json();
+        if (!cancelled) setCodeStatus(d?.valid ? "valid" : "invalid");
+      } catch {
+        if (!cancelled) setCodeStatus("invalid");
+      }
+    }, 450);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [cartCode]);
+
+  // Perfil Asociado (revendedor)
+  const [asociadoActive, setAsociadoActive] = useState(false);
+  const [showAsociadoLogin, setShowAsociadoLogin] = useState(false);
+  const [asociadoUser, setAsociadoUser] = useState("");
+  const [asociadoPass, setAsociadoPass] = useState("");
+  const [asociadoError, setAsociadoError] = useState("");
   const [orderSuccess, setOrderSuccess] = useState(false);
   // Producto sin stock pendiente de confirmar "Me interesa" (modal de aviso)
   const [interestConfirmProduct, setInterestConfirmProduct] = useState<Product | null>(null);
@@ -923,6 +961,12 @@ export default function PecadosPage() {
     } catch (e) {
       console.warn("Aviso al purgar localStorage:", e);
     }
+
+    // Sesión de Asociado (revendedor)
+    fetch("/api/asociado", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d?.reseller && setAsociadoActive(true))
+      .catch(() => {});
 
     // La sesión de administrador la valida el servidor (cookie HttpOnly)
     fetch("/api/auth/me", { cache: "no-store" })
@@ -966,6 +1010,36 @@ export default function PecadosPage() {
       setLoginError("No se pudo conectar con el servidor.");
     }
   };
+
+  // Login / logout del perfil Asociado
+  const handleAsociadoLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAsociadoError("");
+    try {
+      const res = await fetch("/api/asociado/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user: asociadoUser.trim(), password: asociadoPass }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => null);
+        setAsociadoError(d?.error || "Usuario o contraseña incorrectos.");
+        return;
+      }
+      setShowAsociadoLogin(false);
+      setAsociadoUser("");
+      setAsociadoPass("");
+      setIsCartOpen(false);
+      setAsociadoActive(true);
+    } catch {
+      setAsociadoError("No se pudo conectar con el servidor.");
+    }
+  };
+
+  const handleAsociadoLogout = useCallback(() => {
+    setAsociadoActive(false);
+    fetch("/api/asociado/logout", { method: "POST" }).catch(() => {});
+  }, []);
 
   // Logout handler
   const handleLogout = () => {
@@ -1100,6 +1174,9 @@ export default function PecadosPage() {
   // Checkout WhatsApp generator + Automatic Sale Record
   const handleCheckoutWhatsApp = () => {
     if (cart.length === 0) return;
+    // Con código: sólo si es válido (sin código también se puede comprar)
+    const codeToSend = cartCode.trim().toUpperCase();
+    if (codeToSend && codeStatus !== "valid") return;
     const hasPurchase = purchaseCartItems.length > 0;
     const hasInterest = interestCartItems.length > 0;
 
@@ -1148,6 +1225,9 @@ export default function PecadosPage() {
     if (buyerAddress.trim()) {
       message += `📍 *Dirección/Entrega:* ${buyerAddress.trim()}\n`;
     }
+    if (codeToSend) {
+      message += `🏷️ *Código de revendedora:* ${codeToSend}\n`;
+    }
 
     message += hasPurchase
       ? "\n¿Me confirman disponibilidad y coordinamos la entrega? ¡Muchas gracias!"
@@ -1174,6 +1254,7 @@ export default function PecadosPage() {
             items: saleItems.map((i) => ({ sku: i.productSku, quantity: i.quantity })),
             buyerName: buyerName.trim(),
             buyerAddress: buyerAddress.trim(),
+            resellerCode: codeToSend,
           }),
         }).catch((err) => console.error("Error registrando el pedido:", err))
       );
@@ -1188,6 +1269,7 @@ export default function PecadosPage() {
             items: interestCartItems.map((i) => ({ sku: i.product.sku, quantity: i.quantity })),
             buyerName: buyerName.trim(),
             buyerAddress: buyerAddress.trim(),
+            resellerCode: codeToSend,
           }),
         }).catch((err) => console.error("Error registrando el interés:", err))
       );
@@ -1471,16 +1553,20 @@ export default function PecadosPage() {
       zone: "",
       commissionPercent: 15,
       notes: "",
+      code: "",
+      username: "",
+      password: "",
     });
     setShowResellerModal(true);
   };
 
-  const handleSaveReseller = (e: React.FormEvent) => {
+  const handleSaveReseller = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!resellerForm.name.trim()) {
       alert("Ingresá el nombre del revendedor.");
       return;
     }
+    const resellerId = editingReseller ? editingReseller.id : "res-" + Date.now();
 
     if (editingReseller) {
       const updated = resellers.map((r) =>
@@ -1495,10 +1581,10 @@ export default function PecadosPage() {
             }
           : r
       );
-      persistAllData(products, sales, updated, consignments);
+      await persistAllData(products, sales, updated, consignments);
     } else {
       const newRes: Reseller = {
-        id: "res-" + Date.now(),
+        id: resellerId,
         name: resellerForm.name.trim(),
         phone: resellerForm.phone.replace(/[^0-9]/g, ""),
         zone: resellerForm.zone.trim() || "Local",
@@ -1506,16 +1592,47 @@ export default function PecadosPage() {
         notes: resellerForm.notes.trim(),
         createdAt: new Date().toISOString(),
       };
-      persistAllData(products, sales, [newRes, ...resellers], consignments);
+      await persistAllData(products, sales, [newRes, ...resellers], consignments);
     }
+
+    // Código y acceso al perfil Asociado
+    const res = await fetch("/api/admin/revendedores", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: resellerId,
+        code: resellerForm.code,
+        username: resellerForm.username,
+        password: resellerForm.password,
+      }),
+    });
+    const out = await res.json().catch(() => null);
+    if (!res.ok) {
+      alert(`Los datos del revendedor se guardaron, pero no el código/acceso:\n${out?.error || "Error al guardar."}`);
+      fetchServerData();
+      return;
+    }
+    setResellers((prev) =>
+      prev.map((r) =>
+        r.id === resellerId ? { ...r, code: out.code || undefined, username: out.username || undefined, hasPassword: out.hasPassword } : r
+      )
+    );
     setShowResellerModal(false);
   };
 
-  const handleDeleteReseller = (id: string) => {
-    if (window.confirm("¿Seguro que deseás dar de baja este revendedor?")) {
-      const updated = resellers.filter((r) => r.id !== id);
-      persistAllData(products, sales, updated, consignments);
+  const handleDeleteReseller = async (id: string) => {
+    if (!window.confirm("¿Seguro que deseás dar de baja este revendedor?\nPierde el acceso como Asociado y su código deja de funcionar. Sus ventas se conservan.")) return;
+    const res = await fetch("/api/admin/revendedores", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    if (!res.ok && res.status !== 404) {
+      const out = await res.json().catch(() => null);
+      alert(out?.error || "No se pudo dar de baja al revendedor.");
+      return;
     }
+    setResellers((prev) => prev.filter((r) => r.id !== id));
   };
 
   // Consignment delivery handler (Entregar mercadería para revender)
@@ -1750,7 +1867,7 @@ export default function PecadosPage() {
 
   // Export Sales CSV
   const exportSalesCSV = () => {
-    const headers = ["FECHA", "ID_VENTA", "CLIENTE", "CANAL", "REVENDEDOR", "PRODUCTOS", "CANT_ITEMS", "TOTAL_ARS", "MEDIO_PAGO", "NOTAS"];
+    const headers = ["FECHA", "ID_VENTA", "CLIENTE", "CANAL", "REVENDEDOR", "CODIGO_REVENDEDORA", "PRODUCTOS", "CANT_ITEMS", "TOTAL_ARS", "MEDIO_PAGO", "NOTAS"];
     const rows = sales.map((s) => {
       const itemsSummary = s.items.map((i) => `${i.quantity}x ${i.productTitle} (${i.productSku})`).join(" + ");
       return [
@@ -1759,6 +1876,7 @@ export default function PecadosPage() {
         `"${(s.buyerName || "Cliente").replace(/"/g, '""')}"`,
         s.channel === "web_whatsapp" ? "Web WhatsApp" : s.channel === "reseller" ? "Revendedor" : "Venta Directa",
         `"${(s.resellerName || "-").replace(/"/g, '""')}"`,
+        `"${s.resellerCode || "-"}"`,
         `"${itemsSummary.replace(/"/g, '""')}"`,
         s.items.reduce((sum, i) => sum + i.quantity, 0),
         s.totalAmount,
@@ -1911,6 +2029,11 @@ export default function PecadosPage() {
       (p.sku && p.sku.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesCategory && matchesSearch;
   });
+
+  // Perfil Asociado: sólo su panel de ventas
+  if (asociadoActive && !isAdmin) {
+    return <AsociadoPanel onLogout={handleAsociadoLogout} />;
+  }
 
   return (
     <div className="min-h-screen bg-[#0a0506] text-zinc-100 flex flex-col font-sans selection:bg-red-600 selection:text-white">
@@ -2114,6 +2237,17 @@ export default function PecadosPage() {
                 >
                   <Lock className="w-3.5 h-3.5 text-red-400" />
                   <span className="hidden sm:inline">Modo</span> Admin
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAsociadoError("");
+                    setShowAsociadoLogin(true);
+                  }}
+                  className="px-3 py-2 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 text-xs font-medium text-zinc-300 hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <UserCheck className="w-3.5 h-3.5 text-amber-400" />
+                  Asociado
                 </button>
 
                 {/* Cart Trigger (solo clientes públicos) */}
@@ -2850,6 +2984,11 @@ export default function PecadosPage() {
                                 <span className="text-blue-400 font-medium">Venta Directa</span>
                               )}
                             </span>
+                            {s.resellerCode && (
+                              <span className="mt-1 block text-[10px] font-bold text-amber-300">
+                                🏷️ Código <span className="font-mono">{s.resellerCode}</span> → {s.resellerName || "revendedora"}
+                              </span>
+                            )}
                           </td>
                           <td className="p-3.5">
                             <div className="space-y-1">
@@ -2952,6 +3091,16 @@ export default function PecadosPage() {
                         <span className="px-2.5 py-0.5 rounded-full bg-red-950 text-red-300 border border-red-800 text-[10px] font-bold">
                           Comisión: {r.commissionPercent}%
                         </span>
+                        {r.code && (
+                          <span className="px-2 py-0.5 rounded-full bg-zinc-950 text-amber-300 border border-amber-800 text-[10px] font-bold font-mono">
+                            {r.code}
+                          </span>
+                        )}
+                        {r.username && (
+                          <span className="px-2 py-0.5 rounded-full bg-zinc-950 text-emerald-300 border border-emerald-800 text-[10px] font-bold" title="Puede entrar como Asociado">
+                            👤 {r.username}
+                          </span>
+                        )}
                         <div className="flex items-center gap-1">
                           <button
                             onClick={() => {
@@ -2962,6 +3111,9 @@ export default function PecadosPage() {
                                 zone: r.zone,
                                 commissionPercent: r.commissionPercent,
                                 notes: r.notes || "",
+                                code: r.code || "",
+                                username: r.username || "",
+                                password: "",
                               });
                               setShowResellerModal(true);
                             }}
@@ -3701,6 +3853,27 @@ export default function PecadosPage() {
                         onChange={(e) => setBuyerAddress(e.target.value)}
                         className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-red-500 transition-colors"
                       />
+                      <div>
+                        <input
+                          type="text"
+                          placeholder="Código de revendedora (opcional)"
+                          value={cartCode}
+                          onChange={(e) => setCartCode(e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "").slice(0, 20))}
+                          autoCapitalize="characters"
+                          className={`w-full px-3 py-2 rounded-xl bg-zinc-900 border text-xs text-white font-mono placeholder-zinc-500 placeholder:font-sans focus:outline-none transition-colors ${
+                            codeStatus === "invalid"
+                              ? "border-red-600 focus:border-red-500"
+                              : codeStatus === "valid"
+                              ? "border-emerald-600 focus:border-emerald-500"
+                              : "border-zinc-800 focus:border-red-500"
+                          }`}
+                        />
+                        {codeStatus === "checking" && <p className="mt-1 text-[10px] text-zinc-400">Verificando código…</p>}
+                        {codeStatus === "valid" && <p className="mt-1 text-[10px] text-emerald-400">✓ Código válido</p>}
+                        {codeStatus === "invalid" && (
+                          <p className="mt-1 text-[10px] text-red-400">El código no existe. Revisalo o dejalo vacío para continuar.</p>
+                        )}
+                      </div>
                     </div>
 
                     {/* Total */}
@@ -3716,7 +3889,8 @@ export default function PecadosPage() {
                     {/* Checkout Button */}
                     <button
                       onClick={handleCheckoutWhatsApp}
-                      className="w-full py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                      disabled={codeStatus === "invalid" || codeStatus === "checking"}
+                      className="w-full py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 text-white font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                     >
                       <Phone className="w-4 h-4" />
                       <span>
@@ -3849,6 +4023,69 @@ export default function PecadosPage() {
                   Sí, continuar al carrito
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Login del perfil Asociado */}
+      <AnimatePresence>
+        {showAsociadoLogin && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowAsociadoLogin(false)}
+              className="absolute inset-0 bg-black/85 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-sm rounded-2xl bg-zinc-900 border border-zinc-800 p-6 shadow-2xl text-zinc-100 z-10"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-amber-950 text-amber-300 border border-amber-800/60">
+                    <UserCheck className="w-4 h-4" />
+                  </div>
+                  <h3 className="text-base font-bold text-white">Acceso Asociado</h3>
+                </div>
+                <button onClick={() => setShowAsociadoLogin(false)} className="p-1 rounded-lg text-zinc-400 hover:text-white" aria-label="Cerrar">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <form onSubmit={handleAsociadoLogin} className="space-y-4">
+                <div>
+                  <label className="text-xs text-zinc-400 font-medium block mb-1.5">Usuario</label>
+                  <input
+                    type="text"
+                    value={asociadoUser}
+                    onChange={(e) => setAsociadoUser(e.target.value)}
+                    placeholder="Tu usuario"
+                    autoFocus
+                    autoCapitalize="none"
+                    autoComplete="username"
+                    className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-zinc-400 font-medium block mb-1.5">Contraseña</label>
+                  <input
+                    type="password"
+                    value={asociadoPass}
+                    onChange={(e) => setAsociadoPass(e.target.value)}
+                    placeholder="Tu contraseña"
+                    autoComplete="current-password"
+                    className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                {asociadoError && <p className="text-xs text-red-400 font-medium">{asociadoError}</p>}
+                <button type="submit" className="w-full py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-black text-xs font-bold transition-colors cursor-pointer">
+                  Ingresar como Asociado
+                </button>
+              </form>
             </motion.div>
           </div>
         )}
@@ -4840,6 +5077,53 @@ export default function PecadosPage() {
                     placeholder="Ej: La Falda, Villa Giardino, Carlos Paz"
                     className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white"
                   />
+                </div>
+
+                {/* Código y acceso al perfil Asociado (sólo admin) */}
+                <div className="p-3 rounded-xl bg-amber-950/20 border border-amber-900/50 space-y-3">
+                  <span className="text-[11px] font-bold text-amber-300 flex items-center gap-1.5">
+                    <UserCheck className="w-3.5 h-3.5" /> Código y acceso como Asociado
+                  </span>
+                  <div>
+                    <label className="text-zinc-400 font-medium block mb-1">Código de revendedora</label>
+                    <input
+                      type="text"
+                      value={resellerForm.code}
+                      onChange={(e) => setResellerForm({ ...resellerForm, code: e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "").slice(0, 20) })}
+                      placeholder="Ej: MARU10 (lo comparte con sus compradores)"
+                      className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white font-mono"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-zinc-400 font-medium block mb-1">Usuario</label>
+                      <input
+                        type="text"
+                        value={resellerForm.username}
+                        onChange={(e) => setResellerForm({ ...resellerForm, username: e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, "").slice(0, 30) })}
+                        placeholder="ej: agostina"
+                        autoComplete="off"
+                        className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-zinc-400 font-medium block mb-1">
+                        {editingReseller?.hasPassword ? "Nueva contraseña" : "Contraseña"}
+                      </label>
+                      <input
+                        type="password"
+                        value={resellerForm.password}
+                        onChange={(e) => setResellerForm({ ...resellerForm, password: e.target.value })}
+                        placeholder={editingReseller?.hasPassword ? "Vacío = no cambiar" : "Mín. 8 caracteres"}
+                        autoComplete="new-password"
+                        className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-zinc-500 leading-snug">
+                    Con usuario y contraseña puede entrar con el botón <strong>Asociado</strong> y ver/registrar sólo sus ventas.
+                    Dejá el usuario vacío para quitarle el acceso.
+                  </p>
                 </div>
 
                 <div>

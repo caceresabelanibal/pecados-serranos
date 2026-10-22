@@ -40,6 +40,12 @@ model PecadoReseller {
   zone              String   @default("")
   commissionPercent Float    @default(15)
   notes             String   @default("")
+  // Código propio que comparte con sus compradores (ej: MARU10)
+  code              String?  @unique
+  // Acceso al perfil "Asociado"
+  username          String?  @unique
+  passwordHash      String?
+  active            Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }
@@ -56,6 +62,8 @@ model PecadoSale {
   paymentMethod String           @default("efectivo")
   status        String           @default("completed")
   notes         String           @default("")
+  // Código de revendedora usado en la compra (si hubo)
+  resellerCode  String?
   createdAt     DateTime         @default(now())
   items         PecadoSaleItem[]
 
