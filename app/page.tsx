@@ -218,6 +218,8 @@ export default function PecadosPage() {
 
   // Settle Consignment Modal (Rendir mercadería)
   const [settlingConsignment, setSettlingConsignment] = useState<Consignment | null>(null);
+  // "rendir": cobrar lo vendido (y opcionalmente devolución) · "devolver": sólo devolución al depósito
+  const [settleMode, setSettleMode] = useState<"rendir" | "devolver">("rendir");
   const [settleForm, setSettleForm] = useState({
     quantitySold: 0,
     quantityReturned: 0,
@@ -1704,8 +1706,12 @@ export default function PecadosPage() {
     e.preventDefault();
     if (!settlingConsignment) return;
 
-    const sold = Number(settleForm.quantitySold) || 0;
+    const sold = settleMode === "devolver" ? 0 : Number(settleForm.quantitySold) || 0;
     const returned = Number(settleForm.quantityReturned) || 0;
+    if (sold + returned <= 0) {
+      alert(settleMode === "devolver" ? "Indicá cuántas unidades devuelve." : "Indicá unidades vendidas o devueltas.");
+      return;
+    }
 
     // Sólo se rinde lo pendiente (lo que la asociada ya registró como vendido no se vuelve a contar)
     const pendingNow =
@@ -3270,8 +3276,10 @@ export default function PecadosPage() {
                               </td>
                               <td className="p-3.5 text-right">
                                 {pending > 0 && (
+                                  <div className="flex flex-wrap justify-end gap-1.5">
                                   <button
                                     onClick={() => {
+                                      setSettleMode("rendir");
                                       setSettlingConsignment(c);
                                       setSettleForm({
                                         quantitySold: pending,
@@ -3279,10 +3287,26 @@ export default function PecadosPage() {
                                         paymentMethod: "efectivo",
                                       });
                                     }}
-                                    className="px-2.5 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-[11px] transition-colors"
+                                    className="px-2.5 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-[11px] transition-colors whitespace-nowrap"
                                   >
                                     Rendir / Cobrar
                                   </button>
+                                  <button
+                                    onClick={() => {
+                                      setSettleMode("devolver");
+                                      setSettlingConsignment(c);
+                                      setSettleForm({
+                                        quantitySold: 0,
+                                        quantityReturned: pending,
+                                        paymentMethod: "efectivo",
+                                      });
+                                    }}
+                                    className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 text-zinc-100 font-bold text-[11px] transition-colors whitespace-nowrap"
+                                    title="La revendedora devuelve unidades: vuelven al stock del depósito"
+                                  >
+                                    Devolver
+                                  </button>
+                                  </div>
                                 )}
                               </td>
                             </tr>
@@ -5355,7 +5379,15 @@ export default function PecadosPage() {
             >
               <div className="flex items-center justify-between p-4 sm:p-5 border-b border-zinc-800 shrink-0">
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" /> Rendición de Mercadería
+                  {settleMode === "devolver" ? (
+                    <>
+                      <RotateCcw className="w-4 h-4 text-amber-400" /> Devolución de Mercadería
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" /> Rendición de Mercadería
+                    </>
+                  )}
                 </h3>
                 <button onClick={() => setSettlingConsignment(null)} className="p-1 rounded-lg text-zinc-400 hover:text-white">
                   <X className="w-4 h-4" />
@@ -5374,7 +5406,14 @@ export default function PecadosPage() {
                 </div>
 
                 <form onSubmit={handleSettleConsignment} className="space-y-3.5 text-xs">
-                <div className="grid grid-cols-2 gap-3">
+                {settleMode === "devolver" && (
+                  <p className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-900/60 text-amber-200 leading-snug">
+                    Las unidades devueltas salen de lo que la revendedora tiene en mano y vuelven al stock del depósito.
+                    No se registra ninguna venta.
+                  </p>
+                )}
+                <div className={settleMode === "devolver" ? "" : "grid grid-cols-2 gap-3"}>
+                  {settleMode !== "devolver" && (
                   <div>
                     <label className="text-zinc-400 font-medium block mb-1">Cantidad Vendida</label>
                     <input
@@ -5387,8 +5426,11 @@ export default function PecadosPage() {
                       className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white font-mono font-bold"
                     />
                   </div>
+                  )}
                   <div>
-                    <label className="text-zinc-400 font-medium block mb-1">Cantidad Devuelta</label>
+                    <label className="text-zinc-400 font-medium block mb-1">
+                      {settleMode === "devolver" ? "Cantidad que devuelve" : "Cantidad Devuelta"}
+                    </label>
                     <input
                       type="number"
                       required
@@ -5401,6 +5443,7 @@ export default function PecadosPage() {
                   </div>
                 </div>
 
+                {settleMode !== "devolver" && (
                 <div>
                   <label className="text-zinc-400 font-medium block mb-1">Medio de Pago Rendido</label>
                   <select
@@ -5415,9 +5458,10 @@ export default function PecadosPage() {
                     ))}
                   </select>
                 </div>
+                )}
 
                 {/* Calculation breakdown */}
-                {settleForm.quantitySold > 0 && (
+                {settleMode !== "devolver" && settleForm.quantitySold > 0 && (
                   <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-800/60 space-y-1">
                     {(() => {
                       const res = resellers.find((r) => r.id === settlingConsignment.resellerId);
@@ -5456,7 +5500,7 @@ export default function PecadosPage() {
                     type="submit"
                     className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
                   >
-                    Confirmar Rendición
+                    {settleMode === "devolver" ? "Confirmar Devolución" : "Confirmar Rendición"}
                   </button>
                 </div>
               </form>
