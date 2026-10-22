@@ -94,7 +94,7 @@ export default function AgeGate() {
               initial={reduce ? { opacity: 0 } : { opacity: 0, y: 30, scale: 0.94 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-              className="relative w-full max-w-md my-auto"
+              className="relative w-full max-w-md lg:max-w-4xl my-auto"
             >
               {/* Marco con degradé que gira (recortado al borde redondeado) */}
               <div className="relative rounded-[28px] p-[2px] overflow-hidden shadow-2xl shadow-red-950/60">
@@ -104,10 +104,12 @@ export default function AgeGate() {
                 animate={reduce ? undefined : { rotate: 360 }}
                 transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
               />
-              <div className="relative rounded-[26px] bg-zinc-950 px-6 py-7 sm:px-9 sm:py-9 text-center overflow-hidden">
+              <div className="relative rounded-[26px] bg-zinc-950 px-6 py-7 sm:px-9 sm:py-9 lg:px-12 lg:py-10 text-center overflow-hidden lg:grid lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-12 lg:items-center">
+                {/* Columna izquierda en escritorio: logo, +18 y título */}
+                <div className="lg:flex lg:flex-col lg:items-center">
                 {/* Logo flotando con halo */}
                 <motion.div
-                  className="relative mx-auto w-44 h-32 sm:w-56 sm:h-40"
+                  className="relative mx-auto w-44 h-32 sm:w-56 sm:h-40 lg:w-64 lg:h-44"
                   animate={reduce ? undefined : { y: [0, -8, 0] }}
                   transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
                 >
@@ -154,6 +156,10 @@ export default function AgeGate() {
                 >
                   <ShieldAlert className="w-3.5 h-3.5" /> Aviso a los usuarios
                 </motion.p>
+                </div>
+
+                {/* Columna derecha en escritorio: aviso, botones y controles parentales */}
+                <div className="lg:text-left lg:border-l lg:border-zinc-800 lg:pl-12">
 
                 {/* Texto del aviso (lo completa la tienda) */}
                 <motion.p
@@ -161,7 +167,7 @@ export default function AgeGate() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.5 }}
-                  className="mt-4 text-sm text-zinc-300 leading-relaxed"
+                  className="mt-4 lg:mt-0 text-sm text-zinc-300 leading-relaxed"
                 >
                   Este sitio web contiene material restringido a menores de edad, que incluye desnudez y objetos explícitos utilizados y/o comercializados para actividad sexual. Al entrar, afirma que tiene por lo menos 18 años de edad o la mayoría de edad en la jurisdicción desde que está accediendo el sitio web y que da consentimiento en ver contenido sexualmente explícito.
                 </motion.p>
@@ -212,6 +218,7 @@ export default function AgeGate() {
                     contenido para adultos y habilite <strong className="text-zinc-200">SafeSearch</strong> en su motor de búsqueda.
                   </p>
                 </motion.div>
+                </div>
               </div>
               </div>
             </motion.div>
