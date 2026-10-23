@@ -53,7 +53,7 @@ export default function AgeGate() {
           key="age-gate"
           initial={{ opacity: 1 }}
           exit={{ opacity: 0, transition: { duration: 0.5 } }}
-          className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-[#070304]"
+          className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 overflow-y-auto bg-[#070304]"
           role="dialog"
           aria-modal="true"
           aria-labelledby="age-gate-title"
@@ -104,12 +104,12 @@ export default function AgeGate() {
                 animate={reduce ? undefined : { rotate: 360 }}
                 transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
               />
-              <div className="relative rounded-[26px] bg-zinc-950 px-6 py-7 sm:px-9 sm:py-9 lg:px-12 lg:py-10 text-center overflow-hidden lg:grid lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-12 lg:items-center">
+              <div className="relative rounded-[26px] bg-zinc-950 px-5 py-4 sm:px-9 sm:py-9 lg:px-12 lg:py-10 text-center overflow-hidden lg:grid lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-12 lg:items-center">
                 {/* Columna izquierda en escritorio: logo, +18 y título */}
                 <div className="lg:flex lg:flex-col lg:items-center">
                 {/* Logo flotando con halo */}
                 <motion.div
-                  className="relative mx-auto w-44 h-32 sm:w-56 sm:h-40 lg:w-64 lg:h-44"
+                  className="relative mx-auto w-32 h-20 sm:w-56 sm:h-40 lg:w-64 lg:h-44"
                   animate={reduce ? undefined : { y: [0, -8, 0] }}
                   transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
                 >
@@ -132,7 +132,7 @@ export default function AgeGate() {
                   initial={reduce ? undefined : { scale: 0, rotate: -20 }}
                   animate={{ scale: 1, rotate: 0 }}
                   transition={{ delay: 0.35, type: "spring", stiffness: 260, damping: 16 }}
-                  className="mx-auto -mt-1 mb-3 inline-flex items-center justify-center w-14 h-14 rounded-full border-2 border-red-500 bg-red-950/60 text-red-300 font-black text-lg shadow-[0_0_25px_rgba(239,68,68,0.45)]"
+                  className="mx-auto -mt-1 mb-2 sm:mb-3 inline-flex items-center justify-center w-11 h-11 sm:w-14 sm:h-14 rounded-full border-2 border-red-500 bg-red-950/60 text-red-300 font-black text-base sm:text-lg shadow-[0_0_25px_rgba(239,68,68,0.45)]"
                   aria-hidden="true"
                 >
                   +18
@@ -143,7 +143,7 @@ export default function AgeGate() {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.25, duration: 0.5 }}
-                  className="text-2xl sm:text-3xl font-black text-white leading-tight"
+                  className="text-xl sm:text-3xl font-black text-white leading-tight"
                 >
                   Este es un sitio web <span className="text-red-500">para adultos</span>
                 </motion.h2>
@@ -167,7 +167,7 @@ export default function AgeGate() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.5 }}
-                  className="mt-4 lg:mt-0 text-sm text-zinc-300 leading-relaxed"
+                  className="mt-3 sm:mt-4 lg:mt-0 text-[13px] leading-snug sm:text-sm sm:leading-relaxed text-zinc-300"
                 >
                   Este sitio web contiene material restringido a menores de edad, que incluye desnudez y objetos explícitos utilizados y/o comercializados para actividad sexual. Al entrar, afirma que tiene por lo menos 18 años de edad o la mayoría de edad en la jurisdicción desde que está accediendo el sitio web y que da consentimiento en ver contenido sexualmente explícito.
                 </motion.p>
@@ -176,7 +176,7 @@ export default function AgeGate() {
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.6, duration: 0.5 }}
-                  className="mt-6 flex flex-col gap-2.5"
+                  className="mt-4 sm:mt-6 flex flex-col gap-2 sm:gap-2.5"
                 >
                   <motion.button
                     ref={enterRef}
@@ -184,7 +184,7 @@ export default function AgeGate() {
                     onClick={enter}
                     whileHover={reduce ? undefined : { scale: 1.03 }}
                     whileTap={{ scale: 0.97 }}
-                    className="relative w-full py-3.5 rounded-2xl bg-gradient-to-r from-red-600 via-rose-600 to-red-600 bg-[length:200%_100%] text-white font-bold text-sm shadow-lg shadow-red-900/50 overflow-hidden cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
+                    className="relative w-full py-3 sm:py-3.5 rounded-2xl bg-gradient-to-r from-red-600 via-rose-600 to-red-600 bg-[length:200%_100%] text-white font-bold text-sm shadow-lg shadow-red-900/50 overflow-hidden cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
                     animate={reduce ? undefined : { backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"] }}
                     transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
                   >
@@ -197,7 +197,7 @@ export default function AgeGate() {
                     onClick={leave}
                     whileHover={reduce ? undefined : { scale: 1.02 }}
                     whileTap={{ scale: 0.97 }}
-                    className="w-full py-3 rounded-2xl bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-zinc-300 hover:text-white font-semibold text-sm cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
+                    className="w-full py-2.5 sm:py-3 rounded-2xl bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-zinc-300 hover:text-white font-semibold text-sm cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
                   >
                     <span className="inline-flex items-center gap-2">
                       <LogOut className="w-4 h-4" /> Soy menor de 18 años — Salir
@@ -210,10 +210,10 @@ export default function AgeGate() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.8 }}
-                  className="mt-6 p-3.5 rounded-2xl bg-zinc-900/70 border border-zinc-800 text-left"
+                  className="mt-3 sm:mt-6 p-3 sm:p-3.5 rounded-2xl bg-zinc-900/70 border border-zinc-800 text-left"
                 >
                   <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">Sugerencia de controles parentales</p>
-                  <p className="mt-1 text-xs text-zinc-400 leading-relaxed">
+                  <p className="mt-1 text-[11px] leading-snug sm:text-xs sm:leading-relaxed text-zinc-400">
                     Si usted es padre, por favor configure <strong className="text-zinc-200">Family Link</strong>, bloquee el acceso a sitios web con
                     contenido para adultos y habilite <strong className="text-zinc-200">SafeSearch</strong> en su motor de búsqueda.
                   </p>
