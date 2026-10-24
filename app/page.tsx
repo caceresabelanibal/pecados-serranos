@@ -1736,7 +1736,38 @@ export default function PecadosPage() {
       return;
     }
     const updated = consignments.map((x) => (x.id === c.id ? { ...x, commissionPerUnit: n } : x));
-    persistAllData(products, sales, resellers, updated);
+    persistAllData(products, sales, resellers, updated).then(() =>
+      // Las ventas de ese artículo que quedaron con comisión "a definir" toman este valor
+      applyPendingCommission(c.resellerId, c.productId, n)
+    );
+  };
+
+  // Comisión de artículos vendidos por una revendedora que quedaron "a definir"
+  // (ej: vendidos con su código sin habérsele entregado mercadería de ese artículo)
+  const applyPendingCommission = async (resellerId: string, productId: string, commissionUnit: number) => {
+    try {
+      const res = await fetch("/api/admin/comisiones", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resellerId, productId, commissionUnit }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) alert(out.error || "No se pudo guardar la comisión.");
+    } catch {
+      alert("No se pudo guardar la comisión. Revisá la conexión.");
+    }
+    fetchServerData();
+  };
+
+  const handleDefineSoldCommission = (resellerId: string, resellerName: string, productId: string, productTitle: string) => {
+    const value = window.prompt(`Comisión por unidad vendida de "${productTitle}" para ${resellerName}:`, "");
+    if (value === null) return;
+    const n = Number(value.replace(",", "."));
+    if (value.trim() === "" || !Number.isFinite(n) || n < 0) {
+      alert("Ingresá un monto válido (0 o más).");
+      return;
+    }
+    applyPendingCommission(resellerId, productId, n);
   };
 
   // Settle consignment (Rendir cuentas con revendedor)
@@ -3047,7 +3078,9 @@ export default function PecadosPage() {
                               {s.buyerName || "Cliente"}
                             </span>
                             <span className="text-[10px] text-zinc-400 inline-flex items-center gap-1 mt-0.5">
-                              {s.channel === "web_whatsapp" ? (
+                              {s.channel === "web_whatsapp" && s.resellerId ? (
+                                <span className="text-amber-400 font-medium">WhatsApp Web · Venta de {s.resellerName || "revendedora"} (código)</span>
+                              ) : s.channel === "web_whatsapp" ? (
                                 <span className="text-emerald-400 font-medium">WhatsApp Web</span>
                               ) : s.channel === "reseller" ? (
                                 <span className="text-amber-400 font-medium">Revendedor: {s.resellerName}</span>
@@ -3081,6 +3114,23 @@ export default function PecadosPage() {
                                   <strong className="text-white">{i.quantity}x</strong> {i.productTitle}{" "}
                                   <span className="text-red-400 font-mono text-[10px]">[{i.productSku}]</span>{" "}
                                   <span className="text-zinc-500">— ${i.subtotal.toLocaleString("es-AR")}</span>
+                                  {s.resellerId &&
+                                    (i.commissionUnit === null || i.commissionUnit === undefined ? (
+                                      i.productId && (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleDefineSoldCommission(s.resellerId!, s.resellerName || "la revendedora", i.productId, i.productTitle)
+                                          }
+                                          className="ml-1 px-1.5 py-0.5 rounded border border-amber-700 bg-amber-950 text-amber-300 text-[10px] font-bold cursor-pointer"
+                                          title="Definir la comisión por unidad de este artículo para esta revendedora"
+                                        >
+                                          Definir comisión
+                                        </button>
+                                      )
+                                    ) : (
+                                      <span className="ml-1 text-amber-200/80 text-[10px]">· comisión {formatMoney(i.commissionUnit)} c/u</span>
+                                    ))}
                                 </div>
                               ))}
                             </div>
@@ -3156,12 +3206,40 @@ export default function PecadosPage() {
                 const activeUnitsInStreet = resellerConsignments
                   .filter((c) => c.status === "active")
                   .reduce((sum, c) => sum + (c.quantityGiven - c.quantitySold - c.quantityReturned), 0);
-                const totalUnitsSold = resellerConsignments.reduce((sum, c) => sum + c.quantitySold, 0);
-                const totalRevenueSold = resellerConsignments.reduce(
-                  (sum, c) => sum + c.quantitySold * c.unitAgreedPrice,
-                  0
-                );
+                // Todo lo que vendió: mercadería entregada en mano, depósito y compras con su código
                 const resellerSales = sales.filter((s) => s.resellerId === r.id);
+                const totalUnitsSold = resellerSales.reduce((sum, s) => sum + s.items.reduce((u, i) => u + i.quantity, 0), 0);
+                const totalRevenueSold = resellerSales.reduce((sum, s) => sum + s.totalAmount, 0);
+                const soldByProduct = new Map<
+                  string,
+                  { productId: string; title: string; sku: string; units: number; total: number; commission: number; pending: number; byCode: number; inHand: number }
+                >();
+                for (const s of resellerSales) {
+                  const byCode = s.channel === "web_whatsapp";
+                  const inHand = !byCode && /consignaci|Rendición de lote/.test(s.notes || "");
+                  for (const i of s.items) {
+                    const key = i.productId || i.productSku;
+                    const row = soldByProduct.get(key) || {
+                      productId: i.productId,
+                      title: i.productTitle,
+                      sku: i.productSku,
+                      units: 0,
+                      total: 0,
+                      commission: 0,
+                      pending: 0,
+                      byCode: 0,
+                      inHand: 0,
+                    };
+                    row.units += i.quantity;
+                    row.total += i.subtotal;
+                    row.commission += i.commission || 0;
+                    if (i.commissionUnit === null || i.commissionUnit === undefined) row.pending += i.quantity;
+                    if (byCode) row.byCode += i.quantity;
+                    else if (inHand) row.inHand += i.quantity;
+                    soldByProduct.set(key, row);
+                  }
+                }
+                const soldRows = [...soldByProduct.values()].sort((a, b) => b.units - a.units);
                 const totalCommissionEarned = resellerSales.reduce((sum, s) => sum + (s.commissionTotal || 0), 0);
                 const pendingCommissionSales = resellerSales.filter((s) => s.commissionPending).length;
 
@@ -3240,9 +3318,47 @@ export default function PecadosPage() {
                             Vendido Total
                           </span>
                           <span className="text-base font-bold text-emerald-400 mt-0.5 block">
-                            ${totalRevenueSold.toLocaleString("es-AR")}
+                            {formatMoney(totalRevenueSold)}
                           </span>
+                          <span className="text-[10px] text-zinc-500">{totalUnitsSold} un.</span>
                         </div>
+                      </div>
+
+                      {/* Artículos vendidos (en mano, del depósito o con su código) */}
+                      <div className="mt-3">
+                        <span className="text-[10px] text-zinc-500 uppercase font-semibold block mb-1.5">Artículos vendidos</span>
+                        {soldRows.length === 0 ? (
+                          <p className="text-[11px] text-zinc-500">Todavía no vendió artículos.</p>
+                        ) : (
+                          <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                            {soldRows.map((row) => (
+                              <div key={row.productId || row.sku} className="p-2 rounded-lg bg-zinc-950/70 border border-zinc-800/60 text-[11px]">
+                                <div className="flex items-start justify-between gap-2">
+                                  <span className="text-zinc-200 font-semibold leading-snug">
+                                    <strong className="text-white">{row.units}x</strong> {row.title}
+                                  </span>
+                                  <span className="font-mono text-emerald-400 whitespace-nowrap">{formatMoney(row.total)}</span>
+                                </div>
+                                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-zinc-400">
+                                  {row.inHand > 0 && <span>📦 {row.inHand} en mano</span>}
+                                  {row.byCode > 0 && <span className="text-amber-300">🏷️ {row.byCode} con su código</span>}
+                                  {row.units - row.inHand - row.byCode > 0 && <span>🏬 {row.units - row.inHand - row.byCode} del depósito</span>}
+                                  <span className="text-amber-200">Comisión: {formatMoney(row.commission)}</span>
+                                  {row.pending > 0 && row.productId && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDefineSoldCommission(r.id, r.name, row.productId, row.title)}
+                                      className="px-1.5 py-0.5 rounded border border-amber-700 bg-amber-950 text-amber-300 font-bold cursor-pointer"
+                                      title="Definir la comisión por unidad de este artículo"
+                                    >
+                                      Definir comisión ({row.pending} un.)
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
 

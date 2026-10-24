@@ -249,6 +249,22 @@ export default function AsociadoPanel({ onLogout }: Props) {
               </span>
             )}
           </span>
+          {/* Lo que le corresponde a la tienda (proveedora de la mercadería) por cada unidad vendida */}
+          <span className="block text-xs mt-0.5">
+            {c.commissionPerUnit === null ? (
+              <span className="text-zinc-400">A pagar a la tienda: se calcula cuando se defina tu comisión</span>
+            ) : (
+              <span className="text-sky-300">
+                A pagar a la tienda: <strong className="font-mono">{formatMoney(c.unitAgreedPrice - c.commissionPerUnit)}</strong> por unidad
+                {c.pending > 0 && (
+                  <span className="text-zinc-400">
+                    {" "}
+                    · por las {c.pending} en mano: <strong className="font-mono text-sky-300">{formatMoney((c.unitAgreedPrice - c.commissionPerUnit) * c.pending)}</strong>
+                  </span>
+                )}
+              </span>
+            )}
+          </span>
         </div>
       </div>
       <div className="mt-3 grid grid-cols-4 gap-1.5 text-center">
@@ -394,6 +410,16 @@ export default function AsociadoPanel({ onLogout }: Props) {
                           Tu comisión: {formatMoney(s.commissionTotal || 0)}
                           {s.commissionPending ? " (parte a definir)" : ""}
                         </span>
+                        {s.channel === "web_whatsapp" ? (
+                          <span className="block text-[11px] text-zinc-400">Cobró la tienda: te corresponde tu comisión</span>
+                        ) : s.notes?.includes("Rendición de lote") ? (
+                          <span className="block text-[11px] text-zinc-400">Rendida a la tienda</span>
+                        ) : (
+                          <span className="block text-[11px] font-semibold text-sky-300">
+                            A pagar a la tienda: {formatMoney(s.totalAmount - (s.commissionTotal || 0))}
+                            {s.commissionPending ? " (menos la comisión a definir)" : ""}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <ul className="mt-2 space-y-0.5">
