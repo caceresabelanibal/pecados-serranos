@@ -77,6 +77,8 @@ model PecadoSale {
   // Compra online pagada con Mercado Pago (status "pending" hasta que se acredita)
   mpPreferenceId String?
   mpPaymentId    String?
+  // Último estado de pago informado por Mercado Pago (null = abrió el checkout pero nunca intentó pagar)
+  mpStatus       String?
   // false = compra online todavía sin pagar: no descontó stock (se descuenta al confirmarse el pago)
   stockApplied   Boolean  @default(true)
   createdAt     DateTime         @default(now())

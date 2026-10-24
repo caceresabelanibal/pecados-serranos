@@ -6,6 +6,7 @@ import { isAdminRequest, isSameOriginJson } from "@/lib/auth";
 import { isProductComplete, isValidMultiplier, precioPublicoTC, proveedorConIva } from "@/lib/pricing";
 import { productImageUrl, saveDataUriImage } from "@/lib/product-images";
 import { commissionTotals, commissionUnitFor, withCommission } from "@/lib/commission";
+import { LIVE_STATUSES } from "@/lib/mercadopago";
 
 // Valores de precio normalizados con las fórmulas del flujo de caja (el servidor es la fuente de verdad)
 function normalizePricing(p: any) {
@@ -403,7 +404,12 @@ async function getFullState() {
       // Compras online sin cobrar (Mercado Pago sin acreditar o efectivo en mano sin confirmar):
       // no son ventas todavía, se muestran aparte para que el admin las confirme o rechace
       const formattedSales = allSales.filter((s) => s.status !== "pending");
-      const pendingOrders = allSales.filter((s) => s.status === "pending");
+      const pendingOrders = allSales.filter(
+        (s, i) =>
+          s.status === "pending" &&
+          // Mercado Pago: sólo si hay un pago real en curso (abrir el checkout y cerrarlo no es una compra)
+          (s.paymentMethod !== "mercadopago" || LIVE_STATUSES.includes(dbSales[i].mpStatus || ""))
+      );
 
       const formattedConsignments: Consignment[] = dbConsignments.map((c) => ({
         id: c.id,

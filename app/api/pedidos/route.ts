@@ -4,7 +4,7 @@ import { getClientIp, isSameOriginJson, rateLimit } from "@/lib/auth";
 import { SKU_PATTERN, isProductComplete, precioPublicoTC } from "@/lib/pricing";
 import { findResellerByCode, normalizeResellerCode } from "@/lib/reseller-auth";
 import { commissionTotals, commissionUnitFor, withCommission } from "@/lib/commission";
-import { createPreference, getMpToken, publicBaseUrl, sweepExpiredOrders } from "@/lib/mercadopago";
+import { createPreference, getMpToken, publicBaseUrl, sweepExpiredOrders, syncSale } from "@/lib/mercadopago";
 import { cancelSale } from "@/lib/sales";
 
 const MAX_ITEMS = 30;
@@ -48,6 +48,23 @@ export async function POST(request: Request) {
   if (body?.checkout === "mercadopago" && !mpToken) {
     return NextResponse.json({ error: "El pago online no está disponible en este momento." }, { status: 503 });
   }
+  // Si este navegador ya había abierto un pago y vuelve a "Finalizar compra", la orden anterior
+  // sin pagar se anula (no se acumulan órdenes). Si en realidad ya estaba pagada, no se crea otra.
+  const previousOrder = typeof body?.previousOrder === "string" ? body.previousOrder.slice(0, 64) : "";
+  if (mpToken && previousOrder) {
+    try {
+      const prev = await prisma.pecadoSale.findUnique({ where: { id: previousOrder }, select: { channel: true, paymentMethod: true, status: true } });
+      if (prev && prev.channel === "web_whatsapp" && prev.paymentMethod === "mercadopago") {
+        const st = await syncSale(previousOrder, { abandoned: true });
+        if (st === "completed") {
+          return NextResponse.json({ alreadyPaid: true, saleId: previousOrder });
+        }
+      }
+    } catch (err: any) {
+      console.error("[MercadoPago] Error revisando la orden anterior:", previousOrder, err?.message);
+    }
+  }
+
   // Anula las órdenes de Mercado Pago vencidas sin pago
   await sweepExpiredOrders().catch((err) => console.error("[MercadoPago] Error liberando órdenes vencidas:", err));
   const rawItems = Array.isArray(body?.items) ? body.items : [];

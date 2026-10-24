@@ -1305,11 +1305,17 @@ export default function PecadosPage() {
           }),
         }).catch(() => {});
       }
+      // Orden que este navegador ya había mandado a pagar (si se cerró Mercado Pago sin pagar, se reemplaza)
+      let previousOrder = "";
+      try {
+        previousOrder = JSON.parse(sessionStorage.getItem("ps_checkout_cart") || "null")?.saleId || "";
+      } catch {}
       const res = await fetch("/api/pedidos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           checkout: "mercadopago",
+          previousOrder,
           items: purchaseCartItems.map((i) => ({ sku: i.product.sku, quantity: i.quantity })),
           buyerName: buyerName.trim(),
           buyerAddress: buyerAddress.trim(),
@@ -1317,6 +1323,24 @@ export default function PecadosPage() {
         }),
       });
       const out = await res.json().catch(() => ({}));
+      if (res.ok && out.alreadyPaid) {
+        // La compra anterior ya estaba pagada: no se cobra de nuevo
+        try {
+          sessionStorage.removeItem("ps_checkout_cart");
+        } catch {}
+        setCart([]);
+        setIsCartOpen(false);
+        setPaymentResult({ status: "checking", saleId: out.saleId });
+        const st = await fetch("/api/mercadopago/estado", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ venta: out.saleId }),
+        })
+          .then((r) => r.json())
+          .catch(() => null);
+        setPaymentResult({ status: "completed", saleId: out.saleId, totalAmount: st?.totalAmount, items: st?.items });
+        return;
+      }
       if (!res.ok || !out.paymentUrl) {
         setCheckoutError(out.error || "No se pudo iniciar el pago. Probá de nuevo.");
         fetchServerData();

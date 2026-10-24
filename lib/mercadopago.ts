@@ -129,6 +129,9 @@ export async function createPreference(token: string, input: PreferenceInput): P
 
 type PayStatus = "approved" | "pending" | "rejected" | "none";
 
+// Pagos en curso (ej: ticket de efectivo generado y sin pagar, tarjeta en revisión)
+export const LIVE_STATUSES = ["pending", "in_process", "authorized", "in_mediation"];
+
 // Estado real de los pagos de una orden según Mercado Pago
 async function paymentsFor(token: string, saleId: string) {
   const r = await mp<any>(token, `/v1/payments/search?external_reference=${encodeURIComponent(saleId)}&sort=date_created&criteria=desc&limit=20`);
@@ -157,8 +160,13 @@ export async function syncSale(saleId: string, opts: { abandoned?: boolean } = {
     console.error(`[MercadoPago] Pago ${approved.id} por ${approved.transaction_amount} menor al total ${sale.totalAmount} de ${saleId}`);
     return "pending";
   }
-  const live = payments.some((p) => ["pending", "in_process", "authorized", "in_mediation"].includes(p.status));
-  if (live) return "pending";
+  const livePayment = payments.find((p) => LIVE_STATUSES.includes(p.status));
+  // Se guarda el último estado: el admin sólo ve las órdenes con un pago real en curso
+  const lastStatus = livePayment?.status ?? payments[0]?.status ?? null;
+  if (lastStatus !== sale.mpStatus) {
+    await prisma.pecadoSale.updateMany({ where: { id: saleId, status: "pending" }, data: { mpStatus: lastStatus } });
+  }
+  if (livePayment) return "pending";
 
   const expired = Date.now() - sale.date.getTime() > (PAYMENT_WINDOW_MIN + 15) * 60 * 1000;
   if (opts.abandoned || expired) {
