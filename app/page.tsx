@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
+import { usePathname } from "next/navigation";
 import {
   ShoppingBag,
   ShoppingCart,
@@ -104,6 +105,9 @@ import {
 } from "./products";
 
 export default function PecadosPage() {
+  // Accesos privados por URL: /admin (panel de administración) y /asociado (revendedoras)
+  const pathname = usePathname();
+  const entry = pathname === "/admin" ? "admin" : pathname === "/asociado" ? "asociado" : null;
   // Store products & cart
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -238,6 +242,8 @@ export default function PecadosPage() {
 
   // Sales date filter
   const [salesDateFilter, setSalesDateFilter] = useState<"all" | "today" | "week" | "month">("all");
+  // Búsqueda de ventas por código de pedido, cliente o revendedora
+  const [salesQuery, setSalesQuery] = useState("");
 
   // Purchase Excel Import state & types
   interface ImportPurchaseItem {
@@ -925,11 +931,15 @@ export default function PecadosPage() {
   const [checkoutError, setCheckoutError] = useState("");
   // Resultado al volver de Mercado Pago
   const [paymentResult, setPaymentResult] = useState<{
-    status: "completed" | "pending" | "rejected" | "cancelled" | "checking" | "error";
+    // "sent": pedido en efectivo enviado por WhatsApp
+    status: "completed" | "pending" | "rejected" | "cancelled" | "checking" | "error" | "sent";
     saleId: string;
+    orderCode?: string | null;
     totalAmount?: number;
     items?: { title: string; quantity: number; subtotal: number }[];
   } | null>(null);
+  // Código de pedido que se muestra antes de ir a pagar a Mercado Pago
+  const [mpRedirect, setMpRedirect] = useState<{ orderCode: string; url: string } | null>(null);
   // Carrito guardado antes de ir a pagar (se recupera si el pago no se completa)
   const [cartToRestore, setCartToRestore] = useState<{ id: string; quantity: number; interest?: boolean }[] | null>(null);
 
@@ -1031,7 +1041,7 @@ export default function PecadosPage() {
               setPaymentResult({ status: "error", saleId: venta });
               return;
             }
-            setPaymentResult({ status: d.status, saleId: venta, totalAmount: d.totalAmount, items: d.items });
+            setPaymentResult({ status: d.status, saleId: venta, orderCode: d.orderCode, totalAmount: d.totalAmount, items: d.items });
             const saved = sessionStorage.getItem("ps_checkout_cart");
             if (d.status === "completed" || d.status === "pending") {
               sessionStorage.removeItem("ps_checkout_cart");
@@ -1054,7 +1064,10 @@ export default function PecadosPage() {
     // Sesión de Asociado (revendedor)
     fetch("/api/asociado", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => d?.reseller && setAsociadoActive(true))
+      .then((d) => {
+        if (d?.reseller) setAsociadoActive(true);
+        else if (window.location.pathname === "/asociado") setShowAsociadoLogin(true);
+      })
       .catch(() => {});
 
     // La sesión de administrador la valida el servidor (cookie HttpOnly)
@@ -1065,6 +1078,8 @@ export default function PecadosPage() {
           setIsAdmin(true);
           setIsCartOpen(false);
           setCart([]);
+        } else if (window.location.pathname === "/admin") {
+          setShowLoginModal(true);
         }
       })
       .catch(() => {});
@@ -1127,7 +1142,9 @@ export default function PecadosPage() {
 
   const handleAsociadoLogout = useCallback(() => {
     setAsociadoActive(false);
-    fetch("/api/asociado/logout", { method: "POST" }).catch(() => {});
+    fetch("/api/asociado/logout", { method: "POST" })
+      .catch(() => {})
+      .finally(() => window.location.assign("/"));
   }, []);
 
   // Logout handler
@@ -1141,7 +1158,8 @@ export default function PecadosPage() {
         setResellers([]);
         setConsignments([]);
         setPurchases([]);
-        fetchServerData();
+        // Vuelve a la tienda pública
+        window.location.assign("/");
       });
   };
 
@@ -1338,7 +1356,7 @@ export default function PecadosPage() {
         })
           .then((r) => r.json())
           .catch(() => null);
-        setPaymentResult({ status: "completed", saleId: out.saleId, totalAmount: st?.totalAmount, items: st?.items });
+        setPaymentResult({ status: "completed", saleId: out.saleId, orderCode: st?.orderCode, totalAmount: st?.totalAmount, items: st?.items });
         return;
       }
       if (!res.ok || !out.paymentUrl) {
@@ -1358,9 +1376,9 @@ export default function PecadosPage() {
           })
         );
       } catch {}
-      // A la pantalla de pago de Mercado Pago
+      // Antes de ir a pagar: el código de pedido para que lo anote
       setShowBuyerErrors(false);
-      window.location.href = out.paymentUrl;
+      setMpRedirect({ orderCode: out.orderCode, url: out.paymentUrl });
     } catch {
       setCheckoutError("No se pudo conectar. Revisá tu conexión y probá de nuevo.");
     } finally {
@@ -1370,7 +1388,7 @@ export default function PecadosPage() {
 
   // Mensaje de WhatsApp para coordinar la entrega de una compra ya pagada
   const paidOrderWhatsAppUrl = (r: NonNullable<typeof paymentResult>) => {
-    let msg = `🔥 *¡Hola Pecados Serranos!* Ya pagué mi compra con Mercado Pago.\n\n🧾 *Compra N°:* ${r.saleId.slice(-8).toUpperCase()}\n`;
+    let msg = `🔥 *¡Hola Pecados Serranos!* Ya pagué mi compra con Mercado Pago.\n\n🧾 *Código de pedido:* ${r.orderCode || r.saleId.slice(-8).toUpperCase()}\n`;
     for (const i of r.items || []) msg += `• ${i.quantity}x ${i.title} — ${formatMoney(i.subtotal)}\n`;
     if (r.totalAmount) msg += `\n💰 *Total pagado:* ${formatMoney(r.totalAmount)}\n`;
     msg += "\n¿Coordinamos la entrega? ¡Gracias!";
@@ -1378,8 +1396,8 @@ export default function PecadosPage() {
   };
 
   // Checkout WhatsApp generator + Automatic Sale Record
-  const handleCheckoutWhatsApp = () => {
-    if (cart.length === 0) return;
+  const handleCheckoutWhatsApp = async () => {
+    if (cart.length === 0 || checkoutBusy) return;
     if (!buyerDataOk) {
       setShowBuyerErrors(true);
       return;
@@ -1391,7 +1409,7 @@ export default function PecadosPage() {
     const hasInterest = interestCartItems.length > 0;
 
     let message = hasPurchase
-      ? "🔥 *¡Hola Pecados Serranos!* Quiero realizar el siguiente pedido:\n\n"
+      ? "🔥 *¡Hola Pecados Serranos!* Quiero realizar el siguiente pedido:\n\n🧾 *Código de pedido:* {{CODIGO}}\n\n"
       : "🔥 *¡Hola Pecados Serranos!* Me interesan estos productos que hoy están sin stock:\n\n";
     if (hasPurchase) {
       message += "📦 *Detalle del Pedido:*\n";
@@ -1444,12 +1462,18 @@ export default function PecadosPage() {
       ? "\n¿Me confirman disponibilidad y coordinamos la entrega? ¡Muchas gracias!"
       : "\n¡Muchas gracias!";
 
-    // Registrar el pedido en el servidor (precios y stock se validan del lado del servidor).
-    // Queda pendiente: el stock se descuenta cuando el admin confirma que recibió el dinero.
-    const requests: Promise<unknown>[] = [];
-    if (hasPurchase) {
-      requests.push(
-        fetch("/api/pedidos", {
+    // WhatsApp se abre en una pestaña nueva preparada ahora (si se abre después de esperar al
+    // servidor, el navegador la bloquea como ventana emergente)
+    const waWindow = window.open("about:blank", "_blank");
+    setCheckoutBusy(true);
+    setCheckoutError("");
+    let orderCode = "";
+    let saleId = "";
+    try {
+      // Registrar el pedido (precios y stock los valida el servidor). Queda pendiente:
+      // el stock se descuenta cuando el admin confirma que recibió el dinero.
+      if (hasPurchase) {
+        const res = await fetch("/api/pedidos", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1458,13 +1482,20 @@ export default function PecadosPage() {
             buyerAddress: buyerAddress.trim(),
             resellerCode: codeToSend,
           }),
-        }).catch((err) => console.error("Error registrando el pedido:", err))
-      );
-    }
-    if (hasInterest) {
-      // Registro de interés: no es una venta ni descuenta stock
-      requests.push(
-        fetch("/api/interes", {
+        });
+        const out = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          waWindow?.close();
+          setCheckoutError(out.error || "No se pudo registrar el pedido. Probá de nuevo.");
+          fetchServerData();
+          return;
+        }
+        orderCode = out.orderCode || "";
+        saleId = out.saleId || "";
+      }
+      if (hasInterest) {
+        // Registro de interés: no es una venta ni descuenta stock
+        await fetch("/api/interes", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1473,24 +1504,42 @@ export default function PecadosPage() {
             buyerAddress: buyerAddress.trim(),
             resellerCode: codeToSend,
           }),
-        }).catch((err) => console.error("Error registrando el interés:", err))
-      );
+        }).catch((err) => console.error("Error registrando el interés:", err));
+      }
+    } catch {
+      waWindow?.close();
+      setCheckoutError("No se pudo conectar. Revisá tu conexión y probá de nuevo.");
+      return;
+    } finally {
+      setCheckoutBusy(false);
     }
-    Promise.all(requests).finally(() => fetchServerData());
 
-    // Clear cart & notify
+    const waUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message.replace("{{CODIGO}}", orderCode || "-"))}`;
+    if (waWindow) waWindow.location.href = waUrl;
+    else window.open(waUrl, "_blank");
+
+    // Carrito vacío y confirmación con el código de pedido
     setCart([]);
     setShowBuyerErrors(false);
     setCheckoutError("");
-    setOrderSuccess(true);
-
-    const waUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
-    window.open(waUrl, "_blank");
-
-    setTimeout(() => {
-      setOrderSuccess(false);
-      setIsCartOpen(false);
-    }, 3000);
+    setIsCartOpen(false);
+    fetchServerData();
+    if (hasPurchase) {
+      setPaymentResult({
+        status: "sent",
+        saleId,
+        orderCode,
+        totalAmount: cartTotal,
+        items: purchaseCartItems.map((i) => ({
+          title: i.product.title,
+          quantity: i.quantity,
+          subtotal: getItemUnitPrice(i.product, cartPaymentMethod) * i.quantity,
+        })),
+      });
+    } else {
+      setOrderSuccess(true);
+      setTimeout(() => setOrderSuccess(false), 3000);
+    }
   };
 
   // Product CRUD (Admin) with full VShop.xlsb business fields & formulas
@@ -2138,7 +2187,13 @@ export default function PecadosPage() {
 
   // Compras pendientes: confirmar cobro en efectivo, revisar el pago en Mercado Pago o rechazar
   const handlePendingOrder = async (order: Sale, action: "confirmar" | "revisar" | "rechazar") => {
-    if (action === "confirmar" && !window.confirm(`¿Recibiste ${formatMoney(order.totalAmount)} de ${order.buyerName || "la clienta"}? Se registra la venta y se descuenta el stock.`)) return;
+    if (
+      action === "confirmar" &&
+      !window.confirm(
+        `Pedido ${order.orderCode || ""}: ¿recibiste ${formatMoney(order.totalAmount)} de ${order.buyerName || "la clienta"}? Se registra la venta y se descuenta el stock.`
+      )
+    )
+      return;
     if (action === "rechazar" && !window.confirm(`¿Rechazar la compra de ${order.buyerName || "la clienta"}? No se registra ninguna venta.`)) return;
     setPendingBusy(order.id);
     try {
@@ -2204,11 +2259,12 @@ export default function PecadosPage() {
 
   // Export Sales CSV
   const exportSalesCSV = () => {
-    const headers = ["FECHA", "ID_VENTA", "CLIENTE", "CANAL", "REVENDEDOR", "CODIGO_REVENDEDORA", "PRODUCTOS", "CANT_ITEMS", "TOTAL_ARS", "MEDIO_PAGO", "NOTAS"];
+    const headers = ["FECHA", "CODIGO_PEDIDO", "ID_VENTA", "CLIENTE", "CANAL", "REVENDEDOR", "CODIGO_REVENDEDORA", "PRODUCTOS", "CANT_ITEMS", "TOTAL_ARS", "MEDIO_PAGO", "NOTAS"];
     const rows = sales.map((s) => {
       const itemsSummary = s.items.map((i) => `${i.quantity}x ${i.productTitle} (${i.productSku})`).join(" + ");
       return [
         new Date(s.date).toLocaleString("es-AR"),
+        s.orderCode || "",
         s.id,
         `"${(s.buyerName || "Cliente").replace(/"/g, '""')}"`,
         s.channel === "web_whatsapp" ? "Web WhatsApp" : s.channel === "reseller" ? "Revendedor" : "Venta Directa",
@@ -2279,6 +2335,10 @@ export default function PecadosPage() {
 
   // Sales KPI Computations with Date Filtering
   const filteredSales = sales.filter((s) => {
+    const q = salesQuery.trim().toLowerCase();
+    if (q && ![s.orderCode, s.buyerName, s.resellerName, s.resellerCode].some((v) => (v || "").toLowerCase().includes(q))) {
+      return false;
+    }
     if (salesDateFilter === "all") return true;
     const saleDate = new Date(s.date);
     const now = new Date();
@@ -2322,7 +2382,7 @@ export default function PecadosPage() {
   return (
     <div className="min-h-screen bg-[#0a0506] text-zinc-100 flex flex-col font-sans selection:bg-red-600 selection:text-white">
       {/* Aviso de sitio para adultos (en cada visita nueva a la tienda) */}
-      {!isAdmin && <AgeGate />}
+      {!isAdmin && !entry && <AgeGate />}
       {/* Background ambient fiery glow */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
         <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[700px] h-[450px] bg-red-600/15 rounded-full blur-[140px]" />
@@ -2521,26 +2581,6 @@ export default function PecadosPage() {
             {/* Admin toggle button & Cart Trigger */}
             {!isAdmin ? (
               <>
-                <button
-                  type="button"
-                  onClick={() => setShowLoginModal(true)}
-                  className="px-3 py-2 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 text-xs font-medium text-zinc-300 hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <Lock className="w-3.5 h-3.5 text-red-400" />
-                  <span className="hidden sm:inline">Modo</span> Admin
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAsociadoError("");
-                    setShowAsociadoLogin(true);
-                  }}
-                  className="px-3 py-2 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 text-xs font-medium text-zinc-300 hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <UserCheck className="w-3.5 h-3.5 text-amber-400" />
-                  Asociado
-                </button>
-
                 {/* Cart Trigger (solo clientes públicos) */}
                 <button
                   type="button"
@@ -3147,8 +3187,8 @@ export default function PecadosPage() {
                             <span className="block font-bold text-white">{o.buyerName || "Cliente"}</span>
                             <span className="block text-[11px] text-zinc-400">
                               {new Date(o.date).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
-                              {" · N° "}
-                              <span className="font-mono">{o.id.slice(-8).toUpperCase()}</span>
+                              {" · Pedido "}
+                              <span className="font-mono font-bold text-amber-300 tracking-wider">{o.orderCode || o.id.slice(-8).toUpperCase()}</span>
                             </span>
                             {o.notes && <span className="block text-[11px] text-zinc-300 mt-0.5">{o.notes}</span>}
                             {o.resellerCode && (
@@ -3298,7 +3338,14 @@ export default function PecadosPage() {
             </div>
 
             {/* Date Filters */}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="search"
+                value={salesQuery}
+                onChange={(e) => setSalesQuery(e.target.value)}
+                placeholder="Buscar código de pedido o cliente"
+                className="w-full sm:w-64 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-red-500"
+              />
               <span className="text-xs text-zinc-400 font-semibold mr-1">Filtrar período:</span>
               {(["all", "today", "week", "month"] as const).map((period) => (
                 <button
@@ -3354,6 +3401,11 @@ export default function PecadosPage() {
                             <span className="font-bold text-white block">
                               {s.buyerName || "Cliente"}
                             </span>
+                            {s.orderCode && (
+                              <span className="mt-0.5 inline-block px-1.5 py-0.5 rounded bg-zinc-950 border border-zinc-700 text-[10px] font-mono font-bold text-amber-300 tracking-wider">
+                                Pedido {s.orderCode}
+                              </span>
+                            )}
                             <span className="text-[10px] text-zinc-400 inline-flex items-center gap-1 mt-0.5">
                               {s.channel === "web_whatsapp" && s.resellerId ? (
                                 <span className="text-amber-400 font-medium">WhatsApp Web · Venta de {s.resellerName || "revendedora"} (código)</span>
@@ -3895,11 +3947,6 @@ export default function PecadosPage() {
           <div>
             {/* Hero Section */}
             <div className="mb-12 text-center max-w-3xl mx-auto">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-950/70 border border-red-800/50 text-xs font-semibold text-red-300 mb-4 shadow-sm">
-                <Flame className="w-3.5 h-3.5 text-red-400 animate-pulse" />
-                <span>Tienda Oficial • Pedidos Directos por WhatsApp</span>
-              </div>
-
               <div className="flex justify-center mb-6">
                 <div className="relative w-72 sm:w-96 md:w-[460px] h-48 sm:h-64 md:h-72 drop-shadow-[0_20px_40px_rgba(239,68,68,0.3)] transition-transform hover:scale-[1.02] duration-300">
                   <Image
@@ -4513,6 +4560,46 @@ export default function PecadosPage() {
         )}
       </AnimatePresence>
 
+      {/* Código de pedido antes de ir a pagar a Mercado Pago */}
+      <AnimatePresence>
+        {mpRedirect && (
+          <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/85 backdrop-blur-sm" />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              role="dialog"
+              aria-modal="true"
+              className="relative w-full max-w-md rounded-2xl bg-zinc-900 border border-zinc-800 shadow-2xl p-6 text-center"
+            >
+              <h3 className="text-xl font-black text-white">Tu pedido está listo para pagar</h3>
+              <div className="mt-4 p-3 rounded-xl bg-amber-950/40 border border-amber-700">
+                <span className="block text-[11px] uppercase tracking-wider font-bold text-amber-300">Tu código de pedido</span>
+                <span className="block mt-0.5 text-3xl font-black font-mono tracking-[0.2em] text-white select-all">{mpRedirect.orderCode}</span>
+                <span className="block mt-1 text-[11px] text-amber-200/90">Anotalo: es la referencia de tu compra con la tienda.</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  window.location.href = mpRedirect.url;
+                }}
+                className="mt-5 w-full py-3 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-sm flex items-center justify-center gap-2 cursor-pointer"
+              >
+                Anoté el código — Ir a pagar con Mercado Pago
+              </button>
+              <button
+                type="button"
+                onClick={() => setMpRedirect(null)}
+                className="mt-2 w-full py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold text-sm cursor-pointer"
+              >
+                Volver al carrito
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Resultado del pago al volver de Mercado Pago */}
       <AnimatePresence>
         {paymentResult && (
@@ -4540,17 +4627,25 @@ export default function PecadosPage() {
               ) : (
                 <>
                   <div className="text-5xl mb-3">
-                    {paymentResult.status === "completed" ? "🎉" : paymentResult.status === "pending" ? "⏳" : "⚠️"}
+                    {paymentResult.status === "completed" || paymentResult.status === "sent"
+                      ? "🎉"
+                      : paymentResult.status === "pending"
+                      ? "⏳"
+                      : "⚠️"}
                   </div>
                   <h3 className="text-xl font-black text-white">
-                    {paymentResult.status === "completed"
+                    {paymentResult.status === "sent"
+                      ? "¡Pedido enviado!"
+                      : paymentResult.status === "completed"
                       ? "¡Gracias por tu compra!"
                       : paymentResult.status === "pending"
                       ? "Tu pago está pendiente"
                       : "El pago no se completó"}
                   </h3>
                   <p className="mt-2 text-sm text-zinc-300">
-                    {paymentResult.status === "completed"
+                    {paymentResult.status === "sent"
+                      ? "Te abrimos WhatsApp con el detalle de tu pedido: envialo para coordinar la entrega. Pagás en efectivo al recibir."
+                      : paymentResult.status === "completed"
                       ? "Recibimos tu pago. Escribinos por WhatsApp para coordinar la entrega."
                       : paymentResult.status === "pending"
                       ? "Cuando Mercado Pago acredite el pago (por ejemplo, si elegiste pagar en efectivo) tu compra queda confirmada. Tus productos quedan reservados."
@@ -4558,8 +4653,18 @@ export default function PecadosPage() {
                       ? "No pudimos confirmar el pago. Si te debitaron el dinero, escribinos por WhatsApp con tu número de compra."
                       : "No se realizó ningún cobro. Tu carrito sigue disponible para que vuelvas a intentarlo."}
                   </p>
-                  <p className="mt-2 text-[11px] text-zinc-500 font-mono">Compra N° {paymentResult.saleId.slice(-8).toUpperCase()}</p>
-                  {(paymentResult.status === "completed" || paymentResult.status === "pending") && paymentResult.items && (
+                  {paymentResult.orderCode ? (
+                    <div className="mt-4 p-3 rounded-xl bg-amber-950/40 border border-amber-700">
+                      <span className="block text-[11px] uppercase tracking-wider font-bold text-amber-300">Tu código de pedido</span>
+                      <span className="block mt-0.5 text-3xl font-black font-mono tracking-[0.2em] text-white select-all">{paymentResult.orderCode}</span>
+                      <span className="block mt-1 text-[11px] text-amber-200/90">Anotalo: es la referencia de tu compra con la tienda.</span>
+                    </div>
+                  ) : (
+                    paymentResult.saleId && (
+                      <p className="mt-2 text-[11px] text-zinc-500 font-mono">Compra N° {paymentResult.saleId.slice(-8).toUpperCase()}</p>
+                    )
+                  )}
+                  {(paymentResult.status === "completed" || paymentResult.status === "pending" || paymentResult.status === "sent") && paymentResult.items && (
                     <div className="mt-4 p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-left space-y-1">
                       {paymentResult.items.map((i, idx) => (
                         <div key={idx} className="flex justify-between gap-2 text-xs text-zinc-300">
@@ -4576,7 +4681,7 @@ export default function PecadosPage() {
                     </div>
                   )}
                   <div className="mt-5 flex flex-col gap-2">
-                    {paymentResult.status === "completed" || paymentResult.status === "error" ? (
+                    {paymentResult.status === "sent" ? null : paymentResult.status === "completed" || paymentResult.status === "error" ? (
                       <a
                         href={paidOrderWhatsAppUrl(paymentResult)}
                         target="_blank"

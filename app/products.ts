@@ -71,6 +71,7 @@ export interface Sale {
   commissionTotal?: number; // Comisión total de la revendedora en esta venta
   commissionPending?: boolean; // Algún artículo sin comisión definida
   settledAt?: string | null; // Rendida (pagada) a la tienda por la revendedora
+  orderCode?: string | null; // Código de pedido (2 letras + 4 números)
 }
 
 // Lo que la revendedora le tiene que pagar a la tienda por una venta que cobró ella

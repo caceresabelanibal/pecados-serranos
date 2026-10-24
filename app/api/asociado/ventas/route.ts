@@ -5,6 +5,7 @@ import { isSameOriginJson, rateLimit } from "@/lib/auth";
 import { getSessionReseller } from "@/lib/reseller-auth";
 import { commissionTotals, commissionUnitFor, withCommission, type CommissionedItem } from "@/lib/commission";
 import { isEditableByReseller, restoreSaleStock } from "@/lib/sales";
+import { newOrderCode } from "@/lib/order-code";
 import { isProductComplete, precioPublicoTC } from "@/lib/pricing";
 import { PAYMENT_METHOD_OPTIONS, isCashPriceMethod, type PaymentMethod } from "@/app/products";
 
@@ -201,6 +202,7 @@ export async function POST(request: Request) {
       return tx.pecadoSale.create({
         data: {
           ...built.data,
+          orderCode: await newOrderCode(tx),
           channel: "reseller",
           resellerId: g.reseller.id,
           resellerName: g.reseller.name,

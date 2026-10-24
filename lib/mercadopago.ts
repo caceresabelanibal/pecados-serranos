@@ -93,6 +93,7 @@ export async function fetchMpAccount(token: string): Promise<MpAccount> {
 
 export interface PreferenceInput {
   saleId: string;
+  orderCode?: string | null;
   baseUrl: string;
   buyerName: string;
   items: { sku: string; title: string; quantity: number; unitPrice: number }[];
@@ -110,6 +111,7 @@ export async function createPreference(token: string, input: PreferenceInput): P
         title: i.title.slice(0, 250),
         quantity: i.quantity,
         unit_price: Math.round(i.unitPrice * 100) / 100,
+        ...(input.orderCode ? { description: `Pedido ${input.orderCode}` } : {}),
         currency_id: "ARS",
       })),
       payer: { name: input.buyerName.slice(0, 80) },

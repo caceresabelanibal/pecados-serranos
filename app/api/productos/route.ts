@@ -7,6 +7,7 @@ import { isProductComplete, isValidMultiplier, precioPublicoTC, proveedorConIva 
 import { productImageUrl, saveDataUriImage } from "@/lib/product-images";
 import { commissionTotals, commissionUnitFor, withCommission } from "@/lib/commission";
 import { LIVE_STATUSES } from "@/lib/mercadopago";
+import { newOrderCode } from "@/lib/order-code";
 
 // Valores de precio normalizados con las fórmulas del flujo de caja (el servidor es la fuente de verdad)
 function normalizePricing(p: any) {
@@ -388,6 +389,7 @@ async function getFullState() {
         commissionTotal: s.commissionTotal,
         commissionPending: s.commissionPending,
         settledAt: s.settledAt ? s.settledAt.toISOString() : null,
+        orderCode: s.orderCode,
         items: s.items.map((i) => ({
           productId: i.productId || "",
           productSku: i.productSku,
@@ -760,6 +762,7 @@ export async function POST(request: Request) {
               await prisma.pecadoSale.create({
                 data: {
                   id: s.id,
+                  orderCode: await newOrderCode(prisma),
                   date: new Date(s.date),
                   buyerName: s.buyerName || "Cliente",
                   buyerPhone: s.buyerPhone || "",

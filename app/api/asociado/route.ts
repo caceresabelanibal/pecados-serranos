@@ -42,6 +42,7 @@ export async function GET(request: Request) {
         commissionTotal: s.commissionTotal,
         commissionPending: s.commissionPending,
         settledAt: s.settledAt ? s.settledAt.toISOString() : null,
+        orderCode: s.orderCode,
         // Las que cargó ella y todavía no rindió las puede editar o anular
         editable: isEditableByReseller(s, reseller.id),
         items: s.items.map((i) => ({

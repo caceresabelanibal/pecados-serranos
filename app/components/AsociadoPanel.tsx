@@ -41,6 +41,7 @@ interface AsociadoSale {
   commissionTotal?: number;
   commissionPending?: boolean;
   settledAt?: string | null; // rendida (pagada) a la tienda
+  orderCode?: string | null; // código de pedido
   editable?: boolean; // la cargó ella y no está rendida: puede editarla o anularla
   items: { key: string; productTitle: string; quantity: number; unitPrice: number; subtotal: number; commission?: number }[];
 }
@@ -535,7 +536,14 @@ export default function AsociadoPanel({ onLogout }: Props) {
                   <div key={s.id} className="p-4 rounded-2xl bg-zinc-900/70 border border-zinc-800">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div>
-                        <span className="block text-sm font-bold text-white">{s.buyerName || "Cliente"}</span>
+                        <span className="block text-sm font-bold text-white">
+                          {s.buyerName || "Cliente"}
+                          {s.orderCode && (
+                            <span className="ml-2 align-middle px-1.5 py-0.5 rounded bg-zinc-950 border border-zinc-700 text-[10px] font-mono font-bold text-amber-300 tracking-wider">
+                              Pedido {s.orderCode}
+                            </span>
+                          )}
+                        </span>
                         <span className="block text-[11px] text-zinc-400">
                           {fmtDate(s.date)}
                           {" · "}

@@ -6,6 +6,7 @@ import { findResellerByCode, normalizeResellerCode } from "@/lib/reseller-auth";
 import { commissionTotals, commissionUnitFor, withCommission } from "@/lib/commission";
 import { createPreference, getMpToken, publicBaseUrl, sweepExpiredOrders, syncSale } from "@/lib/mercadopago";
 import { cancelSale } from "@/lib/sales";
+import { newOrderCode } from "@/lib/order-code";
 
 const MAX_ITEMS = 30;
 const MAX_QTY_PER_ITEM = 10;
@@ -119,6 +120,7 @@ export async function POST(request: Request) {
 
       return tx.pecadoSale.create({
         data: {
+          orderCode: await newOrderCode(tx),
           buyerName,
           channel: "web_whatsapp",
           resellerId: codeOwner?.id ?? null,
@@ -140,12 +142,19 @@ export async function POST(request: Request) {
       try {
         const pref = await createPreference(mpToken, {
           saleId: sale.id,
+          orderCode: sale.orderCode,
           baseUrl: publicBaseUrl(request),
           buyerName,
           items: sale.items.map((i) => ({ sku: i.productSku, title: i.productTitle, quantity: i.quantity, unitPrice: i.unitPrice })),
         });
         await prisma.pecadoSale.update({ where: { id: sale.id }, data: { mpPreferenceId: pref.id } });
-        return NextResponse.json({ success: true, saleId: sale.id, totalAmount: sale.totalAmount, paymentUrl: pref.initPoint });
+        return NextResponse.json({
+          success: true,
+          saleId: sale.id,
+          orderCode: sale.orderCode,
+          totalAmount: sale.totalAmount,
+          paymentUrl: pref.initPoint,
+        });
       } catch (err: any) {
         // Sin link de pago no hay compra
         console.error("[MercadoPago] Error creando el pago:", err?.message, JSON.stringify(err?.data || {}));
@@ -154,7 +163,7 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ success: true, saleId: sale.id, totalAmount: sale.totalAmount });
+    return NextResponse.json({ success: true, saleId: sale.id, orderCode: sale.orderCode, totalAmount: sale.totalAmount });
   } catch (err: any) {
     if (err?.message === "NO_STOCK") {
       return NextResponse.json({ error: "Algún producto ya no tiene stock suficiente." }, { status: 409 });

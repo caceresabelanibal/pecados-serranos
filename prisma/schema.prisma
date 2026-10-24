@@ -55,6 +55,8 @@ model PecadoReseller {
 
 model PecadoSale {
   id            String           @id @default(cuid())
+  // Código de pedido para el cliente y la tienda (2 letras + 4 números, ej: KM4821)
+  orderCode     String?          @unique
   date          DateTime         @default(now())
   buyerName     String           @default("Cliente Mostrador")
   buyerPhone    String           @default("")

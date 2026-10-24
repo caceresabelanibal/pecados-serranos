@@ -27,6 +27,7 @@ export async function POST(request: Request) {
       {
         status,
         saleId: id,
+        orderCode: sale?.orderCode ?? null,
         totalAmount: sale?.totalAmount ?? 0,
         items: (sale?.items || []).map((i) => ({ title: i.productTitle, quantity: i.quantity, subtotal: i.subtotal })),
       },
