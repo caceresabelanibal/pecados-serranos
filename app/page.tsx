@@ -1386,13 +1386,18 @@ export default function PecadosPage() {
     }
   };
 
+  // Link de WhatsApp con mensaje. Se usa api.whatsapp.com directo: la redirección de wa.me
+  // rompe los emojis del texto (llegan como "�").
+  const whatsappLink = (phone: string, text: string) =>
+    `https://api.whatsapp.com/send?phone=${encodeURIComponent(phone)}&text=${encodeURIComponent(text)}`;
+
   // Mensaje de WhatsApp para coordinar la entrega de una compra ya pagada
   const paidOrderWhatsAppUrl = (r: NonNullable<typeof paymentResult>) => {
     let msg = `🔥 *¡Hola Pecados Serranos!* Ya pagué mi compra con Mercado Pago.\n\n🧾 *Código de pedido:* ${r.orderCode || r.saleId.slice(-8).toUpperCase()}\n`;
     for (const i of r.items || []) msg += `• ${i.quantity}x ${i.title} — ${formatMoney(i.subtotal)}\n`;
     if (r.totalAmount) msg += `\n💰 *Total pagado:* ${formatMoney(r.totalAmount)}\n`;
     msg += "\n¿Coordinamos la entrega? ¡Gracias!";
-    return `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(msg)}`;
+    return whatsappLink(whatsappNumber, msg);
   };
 
   // Checkout WhatsApp generator + Automatic Sale Record
@@ -1514,7 +1519,7 @@ export default function PecadosPage() {
       setCheckoutBusy(false);
     }
 
-    const waUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message.replace("{{CODIGO}}", orderCode || "-"))}`;
+    const waUrl = whatsappLink(whatsappNumber, message.replace("{{CODIGO}}", orderCode || "-"));
     if (waWindow) waWindow.location.href = waUrl;
     else window.open(waUrl, "_blank");
 
