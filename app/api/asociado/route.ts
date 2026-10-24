@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionReseller } from "@/lib/reseller-auth";
 import { isProductComplete, precioPublicoTC } from "@/lib/pricing";
+import { isEditableByReseller } from "@/lib/sales";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -14,7 +15,7 @@ export async function GET(request: Request) {
 
   const [sales, products, consignments] = await Promise.all([
     prisma.pecadoSale.findMany({
-      where: { resellerId: reseller.id },
+      where: { resellerId: reseller.id, status: { not: "cancelled" } },
       include: { items: true },
       orderBy: { date: "desc" },
     }),
@@ -39,7 +40,12 @@ export async function GET(request: Request) {
         notes: s.notes,
         commissionTotal: s.commissionTotal,
         commissionPending: s.commissionPending,
+        settledAt: s.settledAt ? s.settledAt.toISOString() : null,
+        // Las que cargó ella y todavía no rindió las puede editar o anular
+        editable: isEditableByReseller(s, reseller.id),
         items: s.items.map((i) => ({
+          // Para editar: de qué lote ("c:") o del depósito ("p:") salió
+          key: i.consignmentId ? `c:${i.consignmentId}` : i.productId ? `p:${i.productId}` : "",
           productTitle: i.productTitle,
           quantity: i.quantity,
           unitPrice: i.unitPrice,

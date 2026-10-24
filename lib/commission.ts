@@ -20,7 +20,7 @@ export async function commissionUnitFor(db: Db, resellerId: string, productId: s
   });
   if (lot?.commissionPerUnit !== null && lot?.commissionPerUnit !== undefined) return lot.commissionPerUnit;
   const item = await db.pecadoSaleItem.findFirst({
-    where: { productId, commissionUnit: { not: null }, sale: { resellerId } },
+    where: { productId, commissionUnit: { not: null }, sale: { resellerId, status: { not: "cancelled" } } },
     orderBy: { sale: { date: "desc" } },
     select: { commissionUnit: true },
   });

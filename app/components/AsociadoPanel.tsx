@@ -2,8 +2,8 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { BarChart3, Loader2, LogOut, Package, Plus, Receipt, Trash2, UserCheck, X } from "lucide-react";
-import { PAYMENT_METHOD_LABELS, PAYMENT_METHOD_OPTIONS, isCashPriceMethod, type PaymentMethod } from "@/app/products";
+import { BarChart3, Ban, Edit3, Loader2, LogOut, Package, Plus, Receipt, Trash2, UserCheck, X } from "lucide-react";
+import { PAYMENT_METHOD_LABELS, PAYMENT_METHOD_OPTIONS, isCashPriceMethod, owedToStore, type PaymentMethod } from "@/app/products";
 import { formatMoney } from "@/lib/pricing";
 
 interface AsociadoProduct {
@@ -32,6 +32,7 @@ interface AsociadoSale {
   id: string;
   date: string;
   buyerName: string;
+  buyerPhone?: string;
   channel: string;
   totalAmount: number;
   paymentMethod: string;
@@ -39,8 +40,50 @@ interface AsociadoSale {
   notes?: string;
   commissionTotal?: number;
   commissionPending?: boolean;
-  items: { productTitle: string; quantity: number; unitPrice: number; subtotal: number; commission?: number }[];
+  settledAt?: string | null; // rendida (pagada) a la tienda
+  editable?: boolean; // la cargó ella y no está rendida: puede editarla o anularla
+  items: { key: string; productTitle: string; quantity: number; unitPrice: number; subtotal: number; commission?: number }[];
 }
+
+// Período de las ventas que se muestran (y sobre el que se calcula el pago a la tienda)
+type Period = "sin_rendir" | "semana" | "semana_pasada" | "mes" | "mes_pasado" | "todas";
+const PERIOD_OPTIONS: { value: Period; label: string }[] = [
+  { value: "sin_rendir", label: "Sin rendir" },
+  { value: "semana", label: "Esta semana" },
+  { value: "semana_pasada", label: "Semana pasada" },
+  { value: "mes", label: "Este mes" },
+  { value: "mes_pasado", label: "Mes pasado" },
+  { value: "todas", label: "Todas" },
+];
+
+// Rango [desde, hasta) del período; la semana empieza el lunes
+function periodRange(period: Period): [Date, Date] | null {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (period === "semana" || period === "semana_pasada") {
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+    if (period === "semana_pasada") monday.setDate(monday.getDate() - 7);
+    const end = new Date(monday);
+    end.setDate(monday.getDate() + 7);
+    return [monday, end];
+  }
+  if (period === "mes") return [new Date(now.getFullYear(), now.getMonth(), 1), new Date(now.getFullYear(), now.getMonth() + 1, 1)];
+  if (period === "mes_pasado") return [new Date(now.getFullYear(), now.getMonth() - 1, 1), new Date(now.getFullYear(), now.getMonth(), 1)];
+  return null;
+}
+
+// Notas que agrega el sistema a la venta (no se muestran al editar)
+const AUTO_NOTES = [
+  "Vendido de su mercadería en consignación",
+  "Descuento por pago en efectivo (Precio Público FT)",
+  "Registrada por la asociada",
+];
+const userNotes = (notes?: string) =>
+  (notes || "")
+    .split(" | ")
+    .filter((n) => n && !AUTO_NOTES.includes(n))
+    .join(" | ");
 interface AsociadoData {
   reseller: { id: string; name: string; zone: string; code: string | null };
   sales: AsociadoSale[];
@@ -76,6 +119,9 @@ export default function AsociadoPanel({ onLogout }: Props) {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"ventas" | "mercaderia">("ventas");
   const [showModal, setShowModal] = useState(false);
+  const [period, setPeriod] = useState<Period>("sin_rendir");
+  // Venta que se está editando (null = venta nueva)
+  const [editingSale, setEditingSale] = useState<AsociadoSale | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState<{
@@ -105,34 +151,45 @@ export default function AsociadoPanel({ onLogout }: Props) {
     load();
   }, [load]);
 
+  // Al editar, las unidades de la venta original se devuelven antes de volver a descontar
+  const editQty = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const i of editingSale?.items || []) if (i.key) m.set(i.key, (m.get(i.key) || 0) + i.quantity);
+    return m;
+  }, [editingSale]);
+
   // Opciones para vender: primero su mercadería en mano, después el depósito de la tienda
   const consignmentOptions = useMemo<SaleOption[]>(
     () =>
       (data?.consignments || [])
-        .filter((c) => c.pending > 0)
-        .map((c) => ({
+        .map((c) => ({ c, available: c.pending + (editQty.get(`c:${c.id}`) || 0) }))
+        .filter(({ available }) => available > 0)
+        .map(({ c, available }) => ({
           key: `c:${c.id}`,
-          label: `${c.productTitle} — ${c.pending} en mano`,
-          available: c.pending,
+          label: `${c.productTitle} — ${available} en mano`,
+          available,
           unit: () => c.unitAgreedPrice,
           list: c.unitAgreedPrice,
           commission: c.commissionPerUnit,
         })),
-    [data]
+    [data, editQty]
   );
   const productOptions = useMemo<SaleOption[]>(
     () =>
-      (data?.products || []).map((p) => ({
+      (data?.products || []).map((p) => {
+        const available = p.stock + (editQty.get(`p:${p.id}`) || 0);
+        return {
         key: `p:${p.id}`,
-        label: `${p.title}${p.stock <= 0 ? " (sin stock)" : ""}`,
-        available: p.stock,
+        label: `${p.title}${available <= 0 ? " (sin stock)" : ""}`,
+        available,
         unit: (m: PaymentMethod) => (isCashPriceMethod(m) ? p.precioFT : p.precioTC),
         list: p.precioTC,
         // Del depósito: la comisión asignada para ese artículo en su último lote
         commission:
           (data?.consignments || []).find((c) => c.productId === p.id && c.commissionPerUnit !== null)?.commissionPerUnit ?? null,
-      })),
-    [data]
+        };
+      }),
+    [data, editQty]
   );
   const optionByKey = useMemo(
     () => new Map([...consignmentOptions, ...productOptions].map((o) => [o.key, o])),
@@ -145,9 +202,46 @@ export default function AsociadoPanel({ onLogout }: Props) {
 
   const openModal = (presetKey?: string) => {
     const first = presetKey ? optionByKey.get(presetKey) : firstFreeOption([]);
+    setEditingSale(null);
     setForm({ buyerName: "", buyerPhone: "", paymentMethod: "efectivo", notes: "", items: first ? [{ key: first.key, quantity: 1 }] : [] });
     setError("");
     setShowModal(true);
+  };
+
+  const closeModal = () => {
+    setShowModal(false);
+    setEditingSale(null);
+  };
+
+  const openEdit = (sale: AsociadoSale) => {
+    setEditingSale(sale);
+    setForm({
+      buyerName: sale.buyerName === "Cliente" ? "" : sale.buyerName,
+      buyerPhone: sale.buyerPhone || "",
+      paymentMethod: (PAYMENT_METHOD_OPTIONS.some((o) => o.value === sale.paymentMethod) ? sale.paymentMethod : "efectivo") as PaymentMethod,
+      notes: userNotes(sale.notes),
+      items: sale.items.filter((i) => i.key).map((i) => ({ key: i.key, quantity: i.quantity })),
+    });
+    setError("");
+    setShowModal(true);
+  };
+
+  const cancelSale = async (sale: AsociadoSale) => {
+    if (!window.confirm(`¿Anular la venta a ${sale.buyerName || "Cliente"} por ${formatMoney(sale.totalAmount)}? Los productos vuelven a tu mercadería o al depósito.`)) return;
+    const res = await fetch("/api/asociado/ventas", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: sale.id }),
+    }).catch(() => null);
+    if (res?.status === 401) {
+      onLogout();
+      return;
+    }
+    if (!res?.ok) {
+      const out = await res?.json().catch(() => null);
+      alert(out?.error || "No se pudo anular la venta.");
+    }
+    await load();
   };
 
   const listTotal = form.items.reduce((t, i) => t + (optionByKey.get(i.key)?.list || 0) * i.quantity, 0);
@@ -165,9 +259,10 @@ export default function AsociadoPanel({ onLogout }: Props) {
     setError("");
     try {
       const res = await fetch("/api/asociado/ventas", {
-        method: "POST",
+        method: editingSale ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          ...(editingSale ? { id: editingSale.id } : {}),
           buyerName: form.buyerName,
           buyerPhone: form.buyerPhone,
           paymentMethod: form.paymentMethod,
@@ -185,20 +280,31 @@ export default function AsociadoPanel({ onLogout }: Props) {
         return;
       }
       if (!res.ok) {
-        setError(out?.error || "No se pudo registrar la venta.");
+        setError(out?.error || (editingSale ? "No se pudo guardar el cambio." : "No se pudo registrar la venta."));
         return;
       }
       setShowModal(false);
+      setEditingSale(null);
       await load();
     } finally {
       setSaving(false);
     }
   };
 
-  const sales = data?.sales || [];
+  const allSales = data?.sales || [];
+  const range = periodRange(period);
+  const sales = allSales.filter((s) => {
+    if (period === "sin_rendir") return !s.settledAt && owedToStore(s) > 0;
+    if (!range) return true;
+    const d = new Date(s.date);
+    return d >= range[0] && d < range[1];
+  });
   const consignments = data?.consignments || [];
   const totalVendido = sales.reduce((t, s) => t + s.totalAmount, 0);
   const unidades = sales.reduce((t, s) => t + s.items.reduce((u, i) => u + i.quantity, 0), 0);
+  // Pago a la tienda: lo que cobró ella menos su comisión, de las ventas mostradas que todavía no rindió
+  const pagoATienda = sales.reduce((t, s) => t + (s.settledAt ? 0 : owedToStore(s)), 0);
+  const pagoPendienteComision = sales.some((s) => !s.settledAt && owedToStore(s) > 0 && s.commissionPending);
   const enMano = consignments.reduce((t, c) => t + c.pending, 0);
   const valorEnMano = consignments.reduce((t, c) => t + c.pending * c.unitAgreedPrice, 0);
   const comisionGanada = sales.reduce((t, s) => t + (s.commissionTotal || 0), 0);
@@ -206,9 +312,18 @@ export default function AsociadoPanel({ onLogout }: Props) {
   const cerradas = consignments.filter((c) => c.pending <= 0);
 
   const kpi = (items: [string, string, string][]) => (
-    <div className={`grid gap-2 sm:gap-4 ${items.length === 4 ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"}`}>
-      {items.map(([label, value, color]) => (
-        <div key={label} className="p-3 sm:p-4 rounded-2xl bg-zinc-900/80 border border-zinc-800">
+    <div
+      className={`grid gap-2 sm:gap-4 ${
+        items.length === 5 ? "grid-cols-2 sm:grid-cols-5" : items.length === 4 ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"
+      }`}
+    >
+      {items.map(([label, value, color], idx) => (
+        <div
+          key={label}
+          className={`p-3 sm:p-4 rounded-2xl bg-zinc-900/80 border border-zinc-800 ${
+            items.length === 5 && idx === 4 ? "col-span-2 sm:col-span-1 border-sky-900/70 bg-sky-950/30" : ""
+          }`}
+        >
           <span className="block text-[10px] sm:text-[11px] uppercase font-semibold text-zinc-400 leading-tight">{label}</span>
           <span className={`block mt-1 text-lg sm:text-2xl font-black font-mono break-words ${color}`}>{value}</span>
         </div>
@@ -320,7 +435,7 @@ export default function AsociadoPanel({ onLogout }: Props) {
         <div className="max-w-5xl mx-auto px-4 pb-2 flex gap-1.5">
           {(
             [
-              ["ventas", "Mis ventas", BarChart3, sales.length],
+              ["ventas", "Mis ventas", BarChart3, allSales.length],
               ["mercaderia", "Mi mercadería", Package, enMano],
             ] as const
           ).map(([key, label, Icon, count]) => (
@@ -374,15 +489,45 @@ export default function AsociadoPanel({ onLogout }: Props) {
           </div>
         ) : tab === "ventas" ? (
           <>
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Período de las ventas">
+              {PERIOD_OPTIONS.map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => setPeriod(o.value)}
+                  className={`px-3 py-1.5 rounded-full text-[11px] font-bold border cursor-pointer ${
+                    period === o.value
+                      ? "bg-sky-600 border-sky-500 text-white"
+                      : "bg-zinc-900 border-zinc-700 text-zinc-300 hover:border-zinc-500"
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
             {kpi([
               ["Ventas", String(sales.length), "text-white"],
               ["Unidades", String(unidades), "text-amber-300"],
               ["Total vendido", formatMoney(totalVendido), "text-emerald-400"],
               ["Mi comisión", formatMoney(comisionGanada), "text-amber-300"],
+              ["Pago a tienda", formatMoney(pagoATienda), "text-sky-300"],
             ])}
+            {pagoPendienteComision && (
+              <p className="-mt-3 text-[11px] text-amber-300">
+                Hay ventas con comisión a definir: el pago a la tienda va a bajar cuando la tienda la cargue.
+              </p>
+            )}
             {sales.length === 0 ? (
               <div className="p-8 rounded-2xl bg-zinc-900/60 border border-zinc-800 text-center text-sm text-zinc-400">
-                Todavía no tenés ventas registradas. Tocá <strong>Registrar venta</strong> para cargar la primera.
+                {allSales.length === 0 ? (
+                  <>
+                    Todavía no tenés ventas registradas. Tocá <strong>Registrar venta</strong> para cargar la primera.
+                  </>
+                ) : period === "sin_rendir" ? (
+                  "No tenés ventas sin rendir: estás al día con la tienda."
+                ) : (
+                  "No hay ventas en este período."
+                )}
               </div>
             ) : (
               <div className="space-y-3">
@@ -412,11 +557,13 @@ export default function AsociadoPanel({ onLogout }: Props) {
                         </span>
                         {s.channel === "web_whatsapp" ? (
                           <span className="block text-[11px] text-zinc-400">Cobró la tienda: te corresponde tu comisión</span>
-                        ) : s.notes?.includes("Rendición de lote") ? (
-                          <span className="block text-[11px] text-zinc-400">Rendida a la tienda</span>
+                        ) : s.settledAt ? (
+                          <span className="block text-[11px] font-semibold text-emerald-400">
+                            ✓ Rendida a la tienda ({formatMoney(owedToStore(s))})
+                          </span>
                         ) : (
                           <span className="block text-[11px] font-semibold text-sky-300">
-                            A pagar a la tienda: {formatMoney(s.totalAmount - (s.commissionTotal || 0))}
+                            A pagar a la tienda: {formatMoney(owedToStore(s))}
                             {s.commissionPending ? " (menos la comisión a definir)" : ""}
                           </span>
                         )}
@@ -430,6 +577,24 @@ export default function AsociadoPanel({ onLogout }: Props) {
                         </li>
                       ))}
                     </ul>
+                    {s.editable && (
+                      <div className="mt-3 pt-2.5 border-t border-zinc-800 flex flex-wrap justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openEdit(s)}
+                          className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-100 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" /> Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => cancelSale(s)}
+                          className="px-3 py-1.5 rounded-lg bg-red-950/60 hover:bg-red-900/60 border border-red-900 text-red-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Ban className="w-3.5 h-3.5" /> Anular venta
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -465,7 +630,7 @@ export default function AsociadoPanel({ onLogout }: Props) {
       <AnimatePresence>
         {showModal && data && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowModal(false)} className="fixed inset-0 bg-black/85 backdrop-blur-sm" />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closeModal} className="fixed inset-0 bg-black/85 backdrop-blur-sm" />
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -474,9 +639,9 @@ export default function AsociadoPanel({ onLogout }: Props) {
             >
               <div className="flex items-center justify-between p-4 border-b border-zinc-800 shrink-0">
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <Receipt className="w-4 h-4 text-red-400" /> Registrar venta
+                  <Receipt className="w-4 h-4 text-red-400" /> {editingSale ? "Editar venta" : "Registrar venta"}
                 </h3>
-                <button type="button" onClick={() => setShowModal(false)} className="p-1 rounded-lg text-zinc-400 hover:text-white" aria-label="Cerrar">
+                <button type="button" onClick={closeModal} className="p-1 rounded-lg text-zinc-400 hover:text-white" aria-label="Cerrar">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -657,7 +822,7 @@ export default function AsociadoPanel({ onLogout }: Props) {
                 {error && <p className="p-2.5 rounded-xl bg-red-950/60 border border-red-800 text-red-200">{error}</p>}
 
                 <div className="pt-3 border-t border-zinc-800 flex items-center justify-end gap-2">
-                  <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-medium">
+                  <button type="button" onClick={closeModal} className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-medium">
                     Cancelar
                   </button>
                   <button
@@ -665,7 +830,7 @@ export default function AsociadoPanel({ onLogout }: Props) {
                     disabled={saving}
                     className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-60 text-white font-bold flex items-center gap-1.5"
                   >
-                    {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Confirmar venta
+                    {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} {editingSale ? "Guardar cambios" : "Confirmar venta"}
                   </button>
                 </div>
               </form>

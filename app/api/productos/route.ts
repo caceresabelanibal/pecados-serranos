@@ -330,6 +330,8 @@ async function getFullState() {
 
       // 3. Obtener ventas con sus ítems
       const dbSales = await prisma.pecadoSale.findMany({
+        // Las anuladas no se muestran ni cuentan en ningún total
+        where: { status: { not: "cancelled" } },
         include: { items: true },
         orderBy: { date: "desc" },
       });
@@ -393,6 +395,7 @@ async function getFullState() {
         resellerCode: s.resellerCode || undefined,
         commissionTotal: s.commissionTotal,
         commissionPending: s.commissionPending,
+        settledAt: s.settledAt ? s.settledAt.toISOString() : null,
         items: s.items.map((i) => ({
           productId: i.productId || "",
           productSku: i.productSku,
@@ -402,6 +405,7 @@ async function getFullState() {
           subtotal: i.subtotal,
           commissionUnit: i.commissionUnit,
           commission: i.commission,
+          consignmentId: i.consignmentId,
         })),
       }));
 
@@ -739,6 +743,7 @@ export async function POST(request: Request) {
                 unitPrice: i.unitPrice,
                 subtotal: i.subtotal,
                 commissionUnit: validCommission(i.commissionUnit) ? Number(i.commissionUnit) : undefined,
+                consignmentId: typeof i.consignmentId === "string" && i.consignmentId ? i.consignmentId.slice(0, 64) : null,
               }));
               // Ventas de revendedora: comisión por ítem (la del lote si viene informada; si no, la asignada al artículo)
               const items = s.resellerId
@@ -762,6 +767,8 @@ export async function POST(request: Request) {
                   paymentMethod: s.paymentMethod || "efectivo",
                   status: s.status || "completed",
                   notes: s.notes || "",
+                  // Rendición de lote hecha por el admin: ya está cobrada
+                  settledAt: s.channel === "reseller" && s.settledAt ? new Date(s.settledAt) : null,
                   ...commission,
                   items: { create: items },
                 },

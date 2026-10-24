@@ -51,6 +51,7 @@ export interface SaleItem {
   paymentMethodUsed?: "efectivo" | "tarjeta";
   commissionUnit?: number | null; // Comisión de la revendedora por unidad (null = sin definir)
   commission?: number; // Comisión total del ítem
+  consignmentId?: string | null; // Lote en consignación del que salió (vacío = depósito)
 }
 
 export interface Sale {
@@ -69,6 +70,15 @@ export interface Sale {
   resellerCode?: string; // Código de revendedora usado en la compra
   commissionTotal?: number; // Comisión total de la revendedora en esta venta
   commissionPending?: boolean; // Algún artículo sin comisión definida
+  settledAt?: string | null; // Rendida (pagada) a la tienda por la revendedora
+}
+
+// Lo que la revendedora le tiene que pagar a la tienda por una venta que cobró ella
+// (venta registrada como revendedora: total menos su comisión). Las compras online con
+// su código las cobra la tienda, así que no generan deuda.
+export function owedToStore(s: { channel: string; status?: string; totalAmount: number; commissionTotal?: number }): number {
+  if (s.channel !== "reseller" || s.status === "cancelled") return 0;
+  return Math.max(0, Math.round((s.totalAmount - (s.commissionTotal || 0)) * 100) / 100);
 }
 
 export interface Reseller {

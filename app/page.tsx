@@ -97,6 +97,7 @@ import {
   PAYMENT_METHOD_OPTIONS,
   PAYMENT_METHOD_LABELS,
   isCashPriceMethod,
+  owedToStore,
   type PaymentMethod,
 } from "./products";
 
@@ -1823,8 +1824,10 @@ export default function PecadosPage() {
             unitPrice: settlingConsignment.unitAgreedPrice,
             subtotal,
             commissionUnit: lotCommission,
+            consignmentId: settlingConsignment.id,
           },
         ],
+        settledAt: new Date().toISOString(),
         totalAmount: subtotal,
         paymentMethod: settleForm.paymentMethod,
         status: "completed",
@@ -1939,11 +1942,37 @@ export default function PecadosPage() {
   };
 
   // Delete sale record
-  const handleDeleteSale = (saleId: string) => {
-    if (window.confirm("¿Seguro que deseás anular/eliminar este registro de venta?")) {
-      const updated = sales.filter((s) => s.id !== saleId);
-      persistAllData(products, updated, resellers, consignments);
+  const handleDeleteSale = async (saleId: string) => {
+    if (!window.confirm("¿Seguro que deseás anular esta venta? El stock vuelve al depósito (o a la revendedora si era de su mercadería).")) return;
+    try {
+      const res = await fetch("/api/admin/ventas", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: saleId }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) alert(out.error || "No se pudo anular la venta.");
+    } catch {
+      alert("No se pudo anular la venta. Revisá la conexión.");
     }
+    fetchServerData();
+  };
+
+  // Ventas de revendedora rendidas (pagadas a la tienda) o de nuevo sin rendir
+  const handleSetSalesSettled = async (ids: string[], settled: boolean) => {
+    if (ids.length === 0) return;
+    try {
+      const res = await fetch("/api/admin/ventas", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, settled }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) alert(out.error || "No se pudo actualizar la venta.");
+    } catch {
+      alert("No se pudo actualizar la venta. Revisá la conexión.");
+    }
+    fetchServerData();
   };
 
   // Export Stock CSV matching VShop.xlsb structure and formulas
@@ -3101,6 +3130,30 @@ export default function PecadosPage() {
                                 📦 De su mercadería en consignación
                               </span>
                             )}
+                            {owedToStore(s) > 0 &&
+                              (s.settledAt ? (
+                                <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-bold text-emerald-400">
+                                  ✓ Rendida a la tienda ({formatMoney(owedToStore(s))})
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetSalesSettled([s.id], false)}
+                                    className="text-zinc-500 hover:text-zinc-300 underline font-normal cursor-pointer"
+                                  >
+                                    deshacer
+                                  </button>
+                                </span>
+                              ) : (
+                                <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-bold text-sky-300">
+                                  A cobrarle: {formatMoney(owedToStore(s))}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetSalesSettled([s.id], true)}
+                                    className="px-1.5 py-0.5 rounded border border-emerald-700 bg-emerald-950 text-emerald-300 cursor-pointer"
+                                  >
+                                    Marcar rendida
+                                  </button>
+                                </span>
+                              ))}
                             {s.resellerCode && (
                               <span className="mt-1 block text-[10px] font-bold text-amber-300">
                                 🏷️ Código <span className="font-mono">{s.resellerCode}</span> → {s.resellerName || "revendedora"}
@@ -3240,6 +3293,8 @@ export default function PecadosPage() {
                   }
                 }
                 const soldRows = [...soldByProduct.values()].sort((a, b) => b.units - a.units);
+                const unsettledSales = resellerSales.filter((s) => !s.settledAt && owedToStore(s) > 0);
+                const owedNow = unsettledSales.reduce((sum, s) => sum + owedToStore(s), 0);
                 const totalCommissionEarned = resellerSales.reduce((sum, s) => sum + (s.commissionTotal || 0), 0);
                 const pendingCommissionSales = resellerSales.filter((s) => s.commissionPending).length;
 
@@ -3322,6 +3377,27 @@ export default function PecadosPage() {
                           </span>
                           <span className="text-[10px] text-zinc-500">{totalUnitsSold} un.</span>
                         </div>
+                      </div>
+
+                      {/* Lo que la revendedora cobró y todavía no le pagó a la tienda */}
+                      <div className="mt-2 p-2.5 rounded-xl bg-sky-950/30 border border-sky-900/60 flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span className="text-sky-200">
+                          Pendiente de rendir: <strong className="font-mono text-sky-300">{formatMoney(owedNow)}</strong>
+                          <span className="text-[10px] text-zinc-400"> ({unsettledSales.length} {unsettledSales.length === 1 ? "venta" : "ventas"})</span>
+                        </span>
+                        {unsettledSales.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.confirm(`¿${r.name} te pagó ${formatMoney(owedNow)}? Se marcan como rendidas ${unsettledSales.length} ventas.`)) {
+                                handleSetSalesSettled(unsettledSales.map((s) => s.id), true);
+                              }
+                            }}
+                            className="px-2 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-[11px] font-bold cursor-pointer"
+                          >
+                            Marcar todo rendido
+                          </button>
+                        )}
                       </div>
 
                       {/* Artículos vendidos (en mano, del depósito o con su código) */}

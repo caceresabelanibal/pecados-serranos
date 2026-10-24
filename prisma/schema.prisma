@@ -70,6 +70,10 @@ model PecadoSale {
   // Comisión total de la revendedora en esta venta; pending = algún artículo sin comisión definida
   commissionTotal   Float   @default(0)
   commissionPending Boolean @default(false)
+  // Venta de revendedora rendida (pagada) a la tienda; null = sin rendir
+  settledAt     DateTime?
+  // Venta anulada (status = "cancelled"): se devolvió el stock y no cuenta en ningún total
+  cancelledAt   DateTime?
   createdAt     DateTime         @default(now())
   items         PecadoSaleItem[]
 
@@ -89,6 +93,8 @@ model PecadoSaleItem {
   // Comisión de la revendedora por unidad (null = sin comisión definida) y total del ítem
   commissionUnit Float?
   commission     Float     @default(0)
+  // Lote de mercadería en consignación del que salió (null = del depósito)
+  consignmentId  String?
 
   @@index([saleId])
 }
