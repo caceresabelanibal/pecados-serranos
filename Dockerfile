@@ -28,6 +28,8 @@ FROM base AS runner
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
+# Cliente de PostgreSQL 16 (pg_dump / pg_restore) para el backup completo desde el panel
+RUN apk add --no-cache postgresql16-client
 
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/.next ./.next

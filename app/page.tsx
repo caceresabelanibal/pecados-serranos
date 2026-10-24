@@ -59,6 +59,7 @@ import ImageZoom from "@/app/components/ImageZoom";
 import AsociadoPanel from "@/app/components/AsociadoPanel";
 import AgeGate from "@/app/components/AgeGate";
 import MercadoPagoSettings from "@/app/components/MercadoPagoSettings";
+import BackupSettings from "@/app/components/BackupSettings";
 import {
   flujoDeCaja,
   formatMoney,
@@ -112,6 +113,9 @@ export default function PecadosPage() {
 
   // Commercial state (Sales, Resellers, Consignments)
   const [sales, setSales] = useState<Sale[]>([]);
+  // Compras online todavía sin cobrar (no son ventas ni descuentan stock hasta confirmarse)
+  const [pendingOrders, setPendingOrders] = useState<Sale[]>([]);
+  const [pendingBusy, setPendingBusy] = useState<string | null>(null);
   const [resellers, setResellers] = useState<Reseller[]>([]);
   const [consignments, setConsignments] = useState<Consignment[]>([]);
 
@@ -821,6 +825,7 @@ export default function PecadosPage() {
         if (data.sales && Array.isArray(data.sales)) {
           setSales(data.sales);
         }
+        setPendingOrders(Array.isArray(data.pendingOrders) ? data.pendingOrders : []);
         if (data.resellers && Array.isArray(data.resellers)) {
           setResellers(data.resellers);
         }
@@ -914,6 +919,8 @@ export default function PecadosPage() {
 
   // Cobro online con Mercado Pago (lo configura el admin; si no, el pedido sigue por WhatsApp)
   const [mpEnabled, setMpEnabled] = useState(false);
+  // Método de pago del carrito: Mercado Pago (online) o efectivo en mano (pedido por WhatsApp)
+  const [checkoutMethod, setCheckoutMethod] = useState<"mercadopago" | "efectivo">("efectivo");
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
   // Resultado al volver de Mercado Pago
@@ -999,7 +1006,10 @@ export default function PecadosPage() {
     // ¿La tienda cobra online con Mercado Pago?
     fetch("/api/checkout", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setMpEnabled(Boolean(d?.mercadoPago)))
+      .then((d) => {
+        setMpEnabled(Boolean(d?.mercadoPago));
+        if (d?.mercadoPago) setCheckoutMethod("mercadopago");
+      })
       .catch(() => {});
 
     // Vuelta desde Mercado Pago: ?pago=aprobado|pendiente|error&venta=<id>
@@ -1256,6 +1266,11 @@ export default function PecadosPage() {
     setCartToRestore(null);
   }, [cartToRestore, products]);
 
+  useEffect(() => {
+    setCheckoutError("");
+    if (cart.length === 0) setShowBuyerErrors(false);
+  }, [cart, checkoutMethod]);
+
   const purchaseCartItems = cart.filter((item) => !item.interest);
   const interestCartItems = cart.filter((item) => item.interest);
   const cartTotal = purchaseCartItems.reduce((sum, item) => sum + getItemUnitPrice(item.product, cartPaymentMethod) * item.quantity, 0);
@@ -1270,7 +1285,7 @@ export default function PecadosPage() {
     }
     const codeToSend = cartCode.trim().toUpperCase();
     if (codeToSend && codeStatus !== "valid") return;
-    if (!mpEnabled || purchaseCartItems.length === 0) {
+    if (!mpEnabled || checkoutMethod === "efectivo" || purchaseCartItems.length === 0) {
       handleCheckoutWhatsApp();
       return;
     }
@@ -1320,6 +1335,7 @@ export default function PecadosPage() {
         );
       } catch {}
       // A la pantalla de pago de Mercado Pago
+      setShowBuyerErrors(false);
       window.location.href = out.paymentUrl;
     } catch {
       setCheckoutError("No se pudo conectar. Revisá tu conexión y probá de nuevo.");
@@ -1378,6 +1394,7 @@ export default function PecadosPage() {
 
     if (hasPurchase) {
       message += `\n💰 *Total a Pagar:* ${formatMoney(cartTotal)}\n`;
+      message += `💵 *Forma de pago:* Efectivo en mano al recibir\n`;
     }
 
     if (hasInterest) {
@@ -1403,17 +1420,8 @@ export default function PecadosPage() {
       ? "\n¿Me confirman disponibilidad y coordinamos la entrega? ¡Muchas gracias!"
       : "\n¡Muchas gracias!";
 
-    // Deduct stock locally (sólo productos comprados, no los de interés)
-    const updatedProducts = products.map((p) => {
-      const inCart = purchaseCartItems.find((c) => c.product.id === p.id);
-      if (inCart) {
-        return { ...p, stock: Math.max(0, p.stock - inCart.quantity) };
-      }
-      return p;
-    });
-
-    // Registrar el pedido en el servidor (precios y stock se validan del lado del servidor)
-    setProducts(updatedProducts);
+    // Registrar el pedido en el servidor (precios y stock se validan del lado del servidor).
+    // Queda pendiente: el stock se descuenta cuando el admin confirma que recibió el dinero.
     const requests: Promise<unknown>[] = [];
     if (hasPurchase) {
       requests.push(
@@ -1448,6 +1456,8 @@ export default function PecadosPage() {
 
     // Clear cart & notify
     setCart([]);
+    setShowBuyerErrors(false);
+    setCheckoutError("");
     setOrderSuccess(true);
 
     const waUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
@@ -1551,15 +1561,6 @@ export default function PecadosPage() {
       removeFromCart(id);
     } catch {
       alert("No se pudo conectar con el servidor para eliminar el producto.");
-    }
-  };
-
-  const handleResetCatalog = () => {
-    if (window.confirm("¿Seguro que querés restablecer el producto de prueba inicial?")) {
-      fetch("/api/pecados/productos?initial=1", { cache: "no-store" })
-        .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-        .then((d) => persistAllData(d.products, sales, resellers, consignments))
-        .catch(() => alert("No se pudo obtener el catálogo inicial. Volvé a ingresar como administrador."));
     }
   };
 
@@ -2111,6 +2112,36 @@ export default function PecadosPage() {
     fetchServerData();
   };
 
+  // Compras pendientes: confirmar cobro en efectivo, revisar el pago en Mercado Pago o rechazar
+  const handlePendingOrder = async (order: Sale, action: "confirmar" | "revisar" | "rechazar") => {
+    if (action === "confirmar" && !window.confirm(`¿Recibiste ${formatMoney(order.totalAmount)} de ${order.buyerName || "la clienta"}? Se registra la venta y se descuenta el stock.`)) return;
+    if (action === "rechazar" && !window.confirm(`¿Rechazar la compra de ${order.buyerName || "la clienta"}? No se registra ninguna venta.`)) return;
+    setPendingBusy(order.id);
+    try {
+      const res = await fetch("/api/admin/ventas", {
+        method: action === "rechazar" ? "DELETE" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(action === "rechazar" ? { id: order.id } : { id: order.id, action }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) alert(out.error || "No se pudo actualizar la compra.");
+      else if (action === "revisar") {
+        alert(
+          out.status === "completed"
+            ? "El pago está acreditado: la compra quedó confirmada."
+            : out.status === "cancelled"
+            ? "La compra venció sin pago y se anuló."
+            : "Mercado Pago todavía no acreditó el pago."
+        );
+      }
+    } catch {
+      alert("No se pudo conectar con el servidor.");
+    } finally {
+      setPendingBusy(null);
+      fetchServerData();
+    }
+  };
+
   // Ventas de revendedora rendidas (pagadas a la tienda) o de nuevo sin rendir
   const handleSetSalesSettled = async (ids: string[], settled: boolean) => {
     if (ids.length === 0) return;
@@ -2176,59 +2207,6 @@ export default function PecadosPage() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
-
-  // Export Full JSON Backup
-  const exportBackupJSON = () => {
-    const backup = {
-      store: "Pecados Serranos",
-      exportedAt: new Date().toISOString(),
-      whatsappNumber,
-      products,
-      sales,
-      resellers,
-      consignments,
-      purchases,
-    };
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", `Backup_Pecados_Serranos_${new Date().toISOString().slice(0, 10)}.json`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  // Restore JSON Backup directly to PostgreSQL
-  const handleRestoreBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const json = JSON.parse(event.target?.result as string);
-        if (json.products && Array.isArray(json.products)) {
-          if (window.confirm("¿Restaurar esta copia de seguridad? Se sincronizará directamente en la base de datos PostgreSQL.")) {
-            persistAllData(
-              json.products,
-              json.sales || [],
-              json.resellers || resellers,
-              json.consignments || [],
-              json.purchases || [],
-              json.whatsappNumber || undefined
-            );
-            alert("¡Copia de seguridad restaurada con éxito en la base de datos PostgreSQL!");
-          }
-        } else {
-          alert("El archivo no tiene el formato válido de respaldo de Pecados Serranos.");
-        }
-      } catch {
-        alert("Error al leer el archivo JSON.");
-      }
-    };
-    reader.readAsText(file);
   };
 
   // Stock KPI Computations matching VShop.xlsb exact formulas
@@ -2480,6 +2458,11 @@ export default function PecadosPage() {
                 }`}
               >
                 <BarChart3 className="w-3.5 h-3.5" /> Ventas ({sales.length})
+                {pendingOrders.length > 0 && (
+                  <span className="ml-1 px-1.5 rounded-full bg-amber-500 text-black text-[10px] font-black" title="Compras pendientes de cobro">
+                    {pendingOrders.length}
+                  </span>
+                )}
               </button>
               <button
                 onClick={() => setAdminTab("resellers")}
@@ -3117,6 +3100,94 @@ export default function PecadosPage() {
         {/* ============================================================== */}
         {isAdmin && adminTab === "sales" && (
           <div className="space-y-8 animate-fadeIn">
+            {/* Compras online pendientes de cobro */}
+            {pendingOrders.length > 0 && (
+              <div className="p-4 sm:p-5 rounded-2xl bg-amber-950/20 border border-amber-800/60 space-y-3">
+                <div>
+                  <h3 className="text-base font-bold text-amber-200 flex items-center gap-2">
+                    ⏳ Compras pendientes de cobro ({pendingOrders.length})
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Todavía no son ventas y no descontaron stock. Las de efectivo confirmalas cuando recibas el dinero; las de Mercado Pago se
+                    confirman solas cuando se acredita el pago.
+                  </p>
+                </div>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {pendingOrders.map((o) => {
+                    const isMp = o.paymentMethod === "mercadopago";
+                    const busy = pendingBusy === o.id;
+                    return (
+                      <div key={o.id} className="p-3.5 rounded-xl bg-zinc-900/80 border border-zinc-800 text-xs space-y-2">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <span className="block font-bold text-white">{o.buyerName || "Cliente"}</span>
+                            <span className="block text-[11px] text-zinc-400">
+                              {new Date(o.date).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                              {" · N° "}
+                              <span className="font-mono">{o.id.slice(-8).toUpperCase()}</span>
+                            </span>
+                            {o.notes && <span className="block text-[11px] text-zinc-300 mt-0.5">{o.notes}</span>}
+                            {o.resellerCode && (
+                              <span className="block text-[10px] font-bold text-amber-300 mt-0.5">
+                                🏷️ Código {o.resellerCode} → {o.resellerName}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-right">
+                            <span className="block text-base font-black font-mono text-white">{formatMoney(o.totalAmount)}</span>
+                            <span
+                              className={`inline-block mt-0.5 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                isMp ? "bg-sky-950 text-sky-300 border-sky-800" : "bg-emerald-950 text-emerald-300 border-emerald-800"
+                              }`}
+                            >
+                              {isMp ? "Mercado Pago · esperando pago" : "Efectivo en mano"}
+                            </span>
+                          </div>
+                        </div>
+                        <ul className="space-y-0.5 text-zinc-300">
+                          {o.items.map((i, idx) => (
+                            <li key={idx}>
+                              <strong className="text-white">{i.quantity}x</strong> {i.productTitle}{" "}
+                              <span className="text-zinc-500">— {formatMoney(i.subtotal)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                        <div className="pt-2 border-t border-zinc-800 flex flex-wrap justify-end gap-2">
+                          {isMp ? (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => handlePendingOrder(o, "revisar")}
+                              className="px-3 py-1.5 rounded-lg bg-sky-700 hover:bg-sky-600 disabled:opacity-50 text-white font-bold cursor-pointer"
+                            >
+                              Revisar pago
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => handlePendingOrder(o, "confirmar")}
+                              className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white font-bold cursor-pointer"
+                            >
+                              Confirmar cobro
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => handlePendingOrder(o, "rechazar")}
+                            className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-red-950 border border-zinc-700 hover:border-red-800 disabled:opacity-50 text-zinc-200 font-bold cursor-pointer"
+                          >
+                            {isMp ? "Anular" : "Rechazar"}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Header & New Sale Action */}
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800">
               <div>
@@ -3788,66 +3859,7 @@ export default function PecadosPage() {
                 </div>
               </div>
 
-              {/* Backups & Cloud Sync Cards */}
-              <div className="p-5 rounded-2xl bg-zinc-900/80 border border-zinc-800 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-emerald-400" /> Base de Datos PostgreSQL Neon
-                  </h3>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-950/60 border border-emerald-800/60 text-[11px] font-semibold text-emerald-300">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    100% en Base de Datos (Sin localStorage)
-                  </span>
-                </div>
-                <p className="text-xs text-zinc-400">
-                  Tus productos, precios, fotos, compras, revendedores y stock se leen y persisten directamente en la base de datos PostgreSQL Neon en la nube. Cero datos en almacenamiento local (localStorage). Podés forzar la recarga desde la base o descargar un respaldo JSON.
-                </p>
-
-                <div className="flex flex-wrap items-center gap-3 pt-2">
-                  <button
-                    onClick={() => {
-                      fetchServerData();
-                      alert("¡Sincronización con base de datos PostgreSQL completada!");
-                    }}
-                    className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-2 shadow-lg transition-colors cursor-pointer"
-                  >
-                    <RefreshCw className="w-4 h-4" /> Sincronizar con PostgreSQL
-                  </button>
-
-                  <button
-                    onClick={exportBackupJSON}
-                    className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold flex items-center gap-2 border border-zinc-700 transition-colors cursor-pointer"
-                  >
-                    <Download className="w-4 h-4" /> Descargar Copia JSON
-                  </button>
-
-                  <label className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold flex items-center gap-2 border border-zinc-700 transition-colors cursor-pointer">
-                    <Upload className="w-4 h-4 text-zinc-400" /> Restaurar archivo JSON a la Base
-                    <input
-                      type="file"
-                      accept=".json"
-                      onChange={handleRestoreBackup}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-              </div>
-
-              {/* Reset Catalog Warning */}
-              <div className="p-5 rounded-2xl bg-red-950/30 border border-red-900/40 space-y-3">
-                <h3 className="text-base font-bold text-red-300 flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-red-400" /> Restablecer Producto Inicial de Prueba
-                </h3>
-                <p className="text-xs text-zinc-400">
-                  Si deseás reiniciar el catálogo y dejar únicamente el producto de prueba inicial, podés hacerlo con este botón.
-                </p>
-                <button
-                  onClick={handleResetCatalog}
-                  className="px-3.5 py-2 rounded-xl bg-red-900/50 hover:bg-red-800/80 text-red-200 text-xs font-bold border border-red-800/60 transition-colors cursor-pointer"
-                >
-                  Restablecer Catálogo Original
-                </button>
-              </div>
+              <BackupSettings />
             </div>
           </div>
         )}
@@ -4377,6 +4389,52 @@ export default function PecadosPage() {
                       </div>
                     </div>
 
+                    {/* Método de pago */}
+                    {purchaseCartItems.length > 0 && mpEnabled && (
+                      <div className="space-y-2" role="radiogroup" aria-label="Método de pago">
+                        <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider block">Método de pago</span>
+                        {(
+                          [
+                            ["mercadopago", "Mercado Pago", "Dinero en cuenta, tarjetas, Mercado Crédito o efectivo en Rapipago/Pago Fácil"],
+                            ["efectivo", "Efectivo en mano", "Pagás al recibir. Coordinamos la entrega por WhatsApp"],
+                          ] as const
+                        ).map(([value, label, hint]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            role="radio"
+                            aria-checked={checkoutMethod === value}
+                            onClick={() => setCheckoutMethod(value)}
+                            className={`w-full p-3 rounded-xl border flex items-center gap-3 text-left transition-colors cursor-pointer ${
+                              checkoutMethod === value ? "border-sky-500 bg-sky-950/30" : "border-zinc-800 bg-zinc-900 hover:border-zinc-600"
+                            }`}
+                          >
+                            <span
+                              className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center ${
+                                checkoutMethod === value ? "border-sky-400" : "border-zinc-600"
+                              }`}
+                            >
+                              {checkoutMethod === value && <span className="w-2 h-2 rounded-full bg-sky-400" />}
+                            </span>
+                            {value === "mercadopago" ? (
+                              <span className="w-[74px] h-7 rounded-md bg-white flex items-center justify-center shrink-0 px-1">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src="/pecados/mercadopago.png" alt="Mercado Pago" className="max-h-5 w-auto" />
+                              </span>
+                            ) : (
+                              <span className="w-[74px] h-7 rounded-md bg-emerald-950 border border-emerald-800 flex items-center justify-center shrink-0 text-base">
+                                💵
+                              </span>
+                            )}
+                            <span className="min-w-0">
+                              <span className="block text-xs font-bold text-white">{label}</span>
+                              <span className="block text-[10px] text-zinc-400 leading-snug">{hint}</span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
                     {/* Total */}
                     {purchaseCartItems.length > 0 && (
                       <div className="pt-2 border-t border-zinc-800/80 flex items-center justify-between">
@@ -4417,8 +4475,10 @@ export default function PecadosPage() {
                     </button>
 
                     <p className="text-[10px] text-center text-zinc-500 leading-tight">
-                      {purchaseCartItems.length > 0 && mpEnabled
-                        ? "Vas a pagar de forma segura en Mercado Pago: dinero en cuenta, tarjetas de débito y crédito, Mercado Crédito o efectivo."
+                      {purchaseCartItems.length > 0 && mpEnabled && checkoutMethod === "mercadopago"
+                        ? "Vas a pagar de forma segura en Mercado Pago. Tu compra se confirma cuando se acredita el pago."
+                        : purchaseCartItems.length > 0
+                        ? "Se abrirá WhatsApp con el detalle de tu pedido para coordinar la entrega. Pagás en efectivo al recibir."
                         : "Al tocar el botón se abrirá WhatsApp con el detalle completo de tus productos y tu mensaje listo para enviar."}
                     </p>
                   </div>

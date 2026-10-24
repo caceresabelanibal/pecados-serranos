@@ -15,7 +15,8 @@ export async function GET(request: Request) {
 
   const [sales, products, consignments] = await Promise.all([
     prisma.pecadoSale.findMany({
-      where: { resellerId: reseller.id, status: { not: "cancelled" } },
+      // Sólo ventas concretadas (no las anuladas ni las compras online todavía sin pagar)
+      where: { resellerId: reseller.id, status: { notIn: ["cancelled", "pending"] } },
       include: { items: true },
       orderBy: { date: "desc" },
     }),

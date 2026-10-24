@@ -13,9 +13,10 @@ const MAX_QTY_PER_ITEM = 10;
 // POST /api/pedidos
 // Compra pública desde el carrito. El servidor toma los precios y el stock de la base de datos:
 // el navegador sólo indica SKU y cantidad.
-//  - checkout "mercadopago" (si está configurado): la orden queda "pending" con el stock reservado
-//    y se devuelve el link de pago de Mercado Pago. Se completa cuando Mercado Pago acredita el pago.
-//  - sin Mercado Pago: pedido por WhatsApp, como siempre.
+// La compra queda "pending" y NO descuenta stock hasta que se cobra:
+//  - checkout "mercadopago" (si está configurado): se devuelve el link de pago; se confirma sola
+//    cuando Mercado Pago acredita el pago.
+//  - efectivo en mano (pedido por WhatsApp): la confirma el admin cuando recibe el dinero.
 export async function POST(request: Request) {
   if (!isSameOriginJson(request)) {
     return NextResponse.json({ error: "Solicitud inválida." }, { status: 400 });
@@ -47,7 +48,7 @@ export async function POST(request: Request) {
   if (body?.checkout === "mercadopago" && !mpToken) {
     return NextResponse.json({ error: "El pago online no está disponible en este momento." }, { status: 503 });
   }
-  // Libera el stock de órdenes de Mercado Pago vencidas antes de reservar
+  // Anula las órdenes de Mercado Pago vencidas sin pago
   await sweepExpiredOrders().catch((err) => console.error("[MercadoPago] Error liberando órdenes vencidas:", err));
   const rawItems = Array.isArray(body?.items) ? body.items : [];
 
@@ -79,12 +80,8 @@ export async function POST(request: Request) {
       for (const [sku, qty] of wanted) {
         const p = await tx.pecadoProduct.findUnique({ where: { sku } });
         if (!p || !p.active || !isProductComplete(p)) throw new Error("NOT_FOUND");
-        // Descuento atómico: sólo si hay stock suficiente
-        const upd = await tx.pecadoProduct.updateMany({
-          where: { id: p.id, stock: { gte: qty } },
-          data: { stock: { decrement: qty } },
-        });
-        if (upd.count === 0) throw new Error("NO_STOCK");
+        // Tiene que haber stock, pero no se descuenta hasta que la compra se pague
+        if (p.stock < qty) throw new Error("NO_STOCK");
         // Precio único de la tienda: Precio Público TC
         const unitPrice = precioPublicoTC(p.precioEfectivo);
         items.push({
@@ -112,8 +109,9 @@ export async function POST(request: Request) {
           resellerCode: codeOwner?.code ?? null,
           ...commission,
           totalAmount: items.reduce((s, i) => s + i.subtotal, 0),
-          paymentMethod: mpToken ? "mercadopago" : "otro",
-          status: mpToken ? "pending" : "completed",
+          paymentMethod: mpToken ? "mercadopago" : "efectivo",
+          status: "pending",
+          stockApplied: false,
           notes: buyerAddress ? `Dirección: ${buyerAddress}` : "",
           items: { create: finalItems },
         },
@@ -132,7 +130,7 @@ export async function POST(request: Request) {
         await prisma.pecadoSale.update({ where: { id: sale.id }, data: { mpPreferenceId: pref.id } });
         return NextResponse.json({ success: true, saleId: sale.id, totalAmount: sale.totalAmount, paymentUrl: pref.initPoint });
       } catch (err: any) {
-        // Sin link de pago no hay compra: se libera el stock
+        // Sin link de pago no hay compra
         console.error("[MercadoPago] Error creando el pago:", err?.message, JSON.stringify(err?.data || {}));
         await prisma.$transaction((tx) => cancelSale(tx, sale.id));
         return NextResponse.json({ error: "No se pudo iniciar el pago con Mercado Pago. Probá de nuevo en unos minutos." }, { status: 502 });

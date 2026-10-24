@@ -204,16 +204,7 @@ function toPublicProduct(p: Product) {
 // GET /api/productos
 // Público: sólo catálogo con precios de venta. Administrador (cookie de sesión): estado comercial completo.
 export async function GET(request: Request) {
-  if (isAdminRequest(request)) {
-    // Catálogo inicial (para "restablecer catálogo" y restaurar respaldos) — sólo admin
-    if (new URL(request.url).searchParams.get("initial") === "1") {
-      return NextResponse.json(
-        { products: INITIAL_PRODUCTS, resellers: INITIAL_RESELLERS },
-        { headers: NO_STORE }
-      );
-    }
-    return getFullState();
-  }
+  if (isAdminRequest(request)) return getFullState();
 
   const full = await getFullState();
 
@@ -330,7 +321,7 @@ async function getFullState() {
 
       // 3. Obtener ventas con sus ítems
       const dbSales = await prisma.pecadoSale.findMany({
-        // Las anuladas no se muestran ni cuentan en ningún total
+        // Las anuladas no se muestran ni cuentan en ningún total; las pendientes de pago van aparte
         where: { status: { not: "cancelled" } },
         include: { items: true },
         orderBy: { date: "desc" },
@@ -380,7 +371,7 @@ async function getFullState() {
         hasPassword: Boolean(r.passwordHash),
       }));
 
-      const formattedSales: Sale[] = dbSales.map((s) => ({
+      const allSales: Sale[] = dbSales.map((s) => ({
         id: s.id,
         date: s.date.toISOString(),
         buyerName: s.buyerName,
@@ -408,6 +399,11 @@ async function getFullState() {
           consignmentId: i.consignmentId,
         })),
       }));
+
+      // Compras online sin cobrar (Mercado Pago sin acreditar o efectivo en mano sin confirmar):
+      // no son ventas todavía, se muestran aparte para que el admin las confirme o rechace
+      const formattedSales = allSales.filter((s) => s.status !== "pending");
+      const pendingOrders = allSales.filter((s) => s.status === "pending");
 
       const formattedConsignments: Consignment[] = dbConsignments.map((c) => ({
         id: c.id,
@@ -512,6 +508,7 @@ async function getFullState() {
         {
           products: formattedProducts,
           sales: formattedSales,
+          pendingOrders,
           resellers: formattedResellers,
           consignments: formattedConsignments,
           purchases: memoryPurchases,

@@ -1,10 +1,11 @@
 import { prisma } from "@/lib/prisma";
-import { cancelSale } from "@/lib/sales";
+import { cancelSale, confirmPendingSale } from "@/lib/sales";
 
 // -------------------------------------------------------------
 // Cobro con Mercado Pago (Checkout Pro)
 //  - El admin carga el Access Token de producción de SU cuenta: la plata entra a esa cuenta.
-//  - La tienda arma la orden (precios y stock del servidor), crea una "preferencia" y el
+//  - La tienda arma la orden (precios del servidor; el stock se descuenta recién cuando el pago
+//    se acredita), crea una "preferencia" y el
 //    cliente paga en la pantalla de Mercado Pago (dinero en cuenta, tarjetas, Mercado Crédito, efectivo).
 //  - Mercado Pago avisa por webhook; el estado se confirma SIEMPRE consultando su API con el
 //    token (nunca se confía en los datos que llegan en la URL o en el aviso).
@@ -15,7 +16,7 @@ const KEY_TOKEN = "mpAccessToken";
 const KEY_ENABLED = "mpEnabled";
 const KEY_ACCOUNT = "mpAccount";
 
-// Tiempo para pagar: pasado este plazo la orden sin pago se anula y el stock se libera
+// Tiempo para pagar: pasado este plazo la orden sin pago se anula
 export const PAYMENT_WINDOW_MIN = 60;
 export const TOKEN_PATTERN = /^(APP_USR|TEST)-[A-Za-z0-9-]{20,200}$/;
 
@@ -149,10 +150,8 @@ export async function syncSale(saleId: string, opts: { abandoned?: boolean } = {
   if (approved) {
     // Se confirma sólo si se pagó el total de la orden
     if (approved.transaction_amount + 0.01 >= sale.totalAmount) {
-      await prisma.pecadoSale.updateMany({
-        where: { id: saleId, status: "pending" },
-        data: { status: "completed", mpPaymentId: String(approved.id) },
-      });
+      // Pago acreditado: recién ahora se descuenta el stock
+      await prisma.$transaction((tx) => confirmPendingSale(tx, saleId, { mpPaymentId: String(approved.id) }, false));
       return "completed";
     }
     console.error(`[MercadoPago] Pago ${approved.id} por ${approved.transaction_amount} menor al total ${sale.totalAmount} de ${saleId}`);
@@ -186,7 +185,7 @@ export async function handleNotification(topic: string, id: string) {
   }
 }
 
-// Anula las órdenes de Mercado Pago que vencieron sin pago (libera el stock reservado)
+// Anula las órdenes de Mercado Pago que vencieron sin pago
 let lastSweep = 0;
 export async function sweepExpiredOrders() {
   if (Date.now() - lastSweep < 5 * 60 * 1000) return;

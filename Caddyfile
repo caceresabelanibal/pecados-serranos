@@ -10,12 +10,21 @@
 		-Server
 	}
 
-	# Límite de tamaño de las peticiones (imágenes de productos incluidas)
-	request_body {
-		max_size 10MB
+	# Restaurar un backup completo de la base desde el panel (archivos grandes)
+	handle /api/admin/backup {
+		request_body {
+			max_size 200MB
+		}
+		reverse_proxy app:3000
 	}
 
-	reverse_proxy app:3000
+	# Resto del sitio: límite de tamaño de las peticiones (imágenes de productos incluidas)
+	handle {
+		request_body {
+			max_size 10MB
+		}
+		reverse_proxy app:3000
+	}
 }
 
 # www -> dominio principal

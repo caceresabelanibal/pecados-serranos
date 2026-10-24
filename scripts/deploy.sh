@@ -23,6 +23,8 @@ git log --oneline -1
 
 echo "== Reconstruir y levantar"
 docker compose up -d --build
+# Caddy toma los cambios de su configuración (Caddyfile) sin cortar el servicio
+docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile || echo "Aviso: no se pudo recargar Caddy"
 
 echo "== Limpieza de Docker"
 docker image prune -f
