@@ -4,13 +4,18 @@ import { getClientIp, isSameOriginJson, rateLimit } from "@/lib/auth";
 import { SKU_PATTERN, isProductComplete, precioPublicoTC } from "@/lib/pricing";
 import { findResellerByCode, normalizeResellerCode } from "@/lib/reseller-auth";
 import { commissionTotals, commissionUnitFor, withCommission } from "@/lib/commission";
+import { createPreference, getMpToken, publicBaseUrl, sweepExpiredOrders } from "@/lib/mercadopago";
+import { cancelSale } from "@/lib/sales";
 
 const MAX_ITEMS = 30;
 const MAX_QTY_PER_ITEM = 10;
 
 // POST /api/pedidos
-// Pedido público desde el carrito (WhatsApp). El servidor toma los precios y el stock
-// de la base de datos: el navegador sólo indica SKU y cantidad.
+// Compra pública desde el carrito. El servidor toma los precios y el stock de la base de datos:
+// el navegador sólo indica SKU y cantidad.
+//  - checkout "mercadopago" (si está configurado): la orden queda "pending" con el stock reservado
+//    y se devuelve el link de pago de Mercado Pago. Se completa cuando Mercado Pago acredita el pago.
+//  - sin Mercado Pago: pedido por WhatsApp, como siempre.
 export async function POST(request: Request) {
   if (!isSameOriginJson(request)) {
     return NextResponse.json({ error: "Solicitud inválida." }, { status: 400 });
@@ -35,6 +40,15 @@ export async function POST(request: Request) {
 
   const buyerName = typeof body?.buyerName === "string" ? body.buyerName.trim().slice(0, 80) : "";
   const buyerAddress = typeof body?.buyerAddress === "string" ? body.buyerAddress.trim().slice(0, 200) : "";
+  if (buyerName.length < 3 || buyerAddress.length < 3) {
+    return NextResponse.json({ error: "Completá tu nombre completo y la dirección de entrega." }, { status: 400 });
+  }
+  const mpToken = body?.checkout === "mercadopago" ? await getMpToken() : null;
+  if (body?.checkout === "mercadopago" && !mpToken) {
+    return NextResponse.json({ error: "El pago online no está disponible en este momento." }, { status: 503 });
+  }
+  // Libera el stock de órdenes de Mercado Pago vencidas antes de reservar
+  await sweepExpiredOrders().catch((err) => console.error("[MercadoPago] Error liberando órdenes vencidas:", err));
   const rawItems = Array.isArray(body?.items) ? body.items : [];
 
   if (rawItems.length === 0 || rawItems.length > MAX_ITEMS) {
@@ -91,20 +105,39 @@ export async function POST(request: Request) {
 
       return tx.pecadoSale.create({
         data: {
-          buyerName: buyerName || "Cliente Web WhatsApp",
+          buyerName,
           channel: "web_whatsapp",
           resellerId: codeOwner?.id ?? null,
           resellerName: codeOwner?.name ?? null,
           resellerCode: codeOwner?.code ?? null,
           ...commission,
           totalAmount: items.reduce((s, i) => s + i.subtotal, 0),
-          paymentMethod: "otro",
-          status: "completed",
+          paymentMethod: mpToken ? "mercadopago" : "otro",
+          status: mpToken ? "pending" : "completed",
           notes: buyerAddress ? `Dirección: ${buyerAddress}` : "",
           items: { create: finalItems },
         },
+        include: { items: true },
       });
     });
+
+    if (mpToken) {
+      try {
+        const pref = await createPreference(mpToken, {
+          saleId: sale.id,
+          baseUrl: publicBaseUrl(request),
+          buyerName,
+          items: sale.items.map((i) => ({ sku: i.productSku, title: i.productTitle, quantity: i.quantity, unitPrice: i.unitPrice })),
+        });
+        await prisma.pecadoSale.update({ where: { id: sale.id }, data: { mpPreferenceId: pref.id } });
+        return NextResponse.json({ success: true, saleId: sale.id, totalAmount: sale.totalAmount, paymentUrl: pref.initPoint });
+      } catch (err: any) {
+        // Sin link de pago no hay compra: se libera el stock
+        console.error("[MercadoPago] Error creando el pago:", err?.message, JSON.stringify(err?.data || {}));
+        await prisma.$transaction((tx) => cancelSale(tx, sale.id));
+        return NextResponse.json({ error: "No se pudo iniciar el pago con Mercado Pago. Probá de nuevo en unos minutos." }, { status: 502 });
+      }
+    }
 
     return NextResponse.json({ success: true, saleId: sale.id, totalAmount: sale.totalAmount });
   } catch (err: any) {

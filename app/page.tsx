@@ -58,6 +58,7 @@ import CashFlowTab, { type PricingPatch } from "@/app/components/CashFlowTab";
 import ImageZoom from "@/app/components/ImageZoom";
 import AsociadoPanel from "@/app/components/AsociadoPanel";
 import AgeGate from "@/app/components/AgeGate";
+import MercadoPagoSettings from "@/app/components/MercadoPagoSettings";
 import {
   flujoDeCaja,
   formatMoney,
@@ -905,9 +906,25 @@ export default function PecadosPage() {
     }
   };
 
-  // Client buyer info
+  // Client buyer info (obligatorios para comprar)
   const [buyerName, setBuyerName] = useState("");
   const [buyerAddress, setBuyerAddress] = useState("");
+  const buyerDataOk = buyerName.trim().length >= 3 && buyerAddress.trim().length >= 3;
+  const [showBuyerErrors, setShowBuyerErrors] = useState(false);
+
+  // Cobro online con Mercado Pago (lo configura el admin; si no, el pedido sigue por WhatsApp)
+  const [mpEnabled, setMpEnabled] = useState(false);
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [checkoutError, setCheckoutError] = useState("");
+  // Resultado al volver de Mercado Pago
+  const [paymentResult, setPaymentResult] = useState<{
+    status: "completed" | "pending" | "rejected" | "cancelled" | "checking" | "error";
+    saleId: string;
+    totalAmount?: number;
+    items?: { title: string; quantity: number; subtotal: number }[];
+  } | null>(null);
+  // Carrito guardado antes de ir a pagar (se recupera si el pago no se completa)
+  const [cartToRestore, setCartToRestore] = useState<{ id: string; quantity: number; interest?: boolean }[] | null>(null);
 
   // Código de revendedora en el carrito (opcional; si se ingresa debe ser válido)
   const [cartCode, setCartCode] = useState("");
@@ -978,6 +995,51 @@ export default function PecadosPage() {
     } catch (e) {
       console.warn("Aviso al purgar localStorage:", e);
     }
+
+    // ¿La tienda cobra online con Mercado Pago?
+    fetch("/api/checkout", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setMpEnabled(Boolean(d?.mercadoPago)))
+      .catch(() => {});
+
+    // Vuelta desde Mercado Pago: ?pago=aprobado|pendiente|error&venta=<id>
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const pago = params.get("pago");
+      const venta = params.get("venta");
+      if (pago && venta) {
+        window.history.replaceState(null, "", window.location.pathname);
+        setPaymentResult({ status: "checking", saleId: venta });
+        fetch("/api/mercadopago/estado", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ venta, abandoned: pago === "error" }),
+        })
+          .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+          .then(({ ok, d }) => {
+            if (!ok) {
+              setPaymentResult({ status: "error", saleId: venta });
+              return;
+            }
+            setPaymentResult({ status: d.status, saleId: venta, totalAmount: d.totalAmount, items: d.items });
+            const saved = sessionStorage.getItem("ps_checkout_cart");
+            if (d.status === "completed" || d.status === "pending") {
+              sessionStorage.removeItem("ps_checkout_cart");
+            } else if (saved) {
+              // No se pagó: el carrito vuelve como estaba
+              const snap = JSON.parse(saved);
+              if (snap?.saleId === venta) {
+                setCartToRestore(snap.items || []);
+                setBuyerName(snap.buyerName || "");
+                setBuyerAddress(snap.buyerAddress || "");
+                setCartCode(snap.code || "");
+              }
+              sessionStorage.removeItem("ps_checkout_cart");
+            }
+          })
+          .catch(() => setPaymentResult({ status: "error", saleId: venta }));
+      }
+    } catch {}
 
     // Sesión de Asociado (revendedor)
     fetch("/api/asociado", { cache: "no-store" })
@@ -1183,14 +1245,105 @@ export default function PecadosPage() {
     return product.precioTarjeta || product.price || 0;
   };
 
+  useEffect(() => {
+    if (!cartToRestore || products.length === 0) return;
+    const restored: CartItem[] = [];
+    for (const it of cartToRestore) {
+      const product = products.find((p) => p.id === it.id);
+      if (product) restored.push({ product, quantity: it.quantity, interest: it.interest });
+    }
+    setCart(restored);
+    setCartToRestore(null);
+  }, [cartToRestore, products]);
+
   const purchaseCartItems = cart.filter((item) => !item.interest);
   const interestCartItems = cart.filter((item) => item.interest);
   const cartTotal = purchaseCartItems.reduce((sum, item) => sum + getItemUnitPrice(item.product, cartPaymentMethod) * item.quantity, 0);
   const cartItemsCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
+  // "Finalizar compra": con Mercado Pago activo se paga online; si no, el pedido sigue por WhatsApp
+  const handleFinalizePurchase = async () => {
+    if (cart.length === 0 || checkoutBusy) return;
+    if (!buyerDataOk) {
+      setShowBuyerErrors(true);
+      return;
+    }
+    const codeToSend = cartCode.trim().toUpperCase();
+    if (codeToSend && codeStatus !== "valid") return;
+    if (!mpEnabled || purchaseCartItems.length === 0) {
+      handleCheckoutWhatsApp();
+      return;
+    }
+    setCheckoutBusy(true);
+    setCheckoutError("");
+    try {
+      if (interestCartItems.length > 0) {
+        // Los productos sin stock quedan registrados como interés (no se cobran)
+        await fetch("/api/interes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: interestCartItems.map((i) => ({ sku: i.product.sku, quantity: i.quantity })),
+            buyerName: buyerName.trim(),
+            buyerAddress: buyerAddress.trim(),
+            resellerCode: codeToSend,
+          }),
+        }).catch(() => {});
+      }
+      const res = await fetch("/api/pedidos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          checkout: "mercadopago",
+          items: purchaseCartItems.map((i) => ({ sku: i.product.sku, quantity: i.quantity })),
+          buyerName: buyerName.trim(),
+          buyerAddress: buyerAddress.trim(),
+          resellerCode: codeToSend,
+        }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok || !out.paymentUrl) {
+        setCheckoutError(out.error || "No se pudo iniciar el pago. Probá de nuevo.");
+        fetchServerData();
+        return;
+      }
+      try {
+        sessionStorage.setItem(
+          "ps_checkout_cart",
+          JSON.stringify({
+            saleId: out.saleId,
+            items: purchaseCartItems.map((i) => ({ id: i.product.id, quantity: i.quantity })),
+            buyerName,
+            buyerAddress,
+            code: cartCode,
+          })
+        );
+      } catch {}
+      // A la pantalla de pago de Mercado Pago
+      window.location.href = out.paymentUrl;
+    } catch {
+      setCheckoutError("No se pudo conectar. Revisá tu conexión y probá de nuevo.");
+    } finally {
+      setCheckoutBusy(false);
+    }
+  };
+
+  // Mensaje de WhatsApp para coordinar la entrega de una compra ya pagada
+  const paidOrderWhatsAppUrl = (r: NonNullable<typeof paymentResult>) => {
+    let msg = `🔥 *¡Hola Pecados Serranos!* Ya pagué mi compra con Mercado Pago.\n\n🧾 *Compra N°:* ${r.saleId.slice(-8).toUpperCase()}\n`;
+    for (const i of r.items || []) msg += `• ${i.quantity}x ${i.title} — ${formatMoney(i.subtotal)}\n`;
+    if (r.totalAmount) msg += `\n💰 *Total pagado:* ${formatMoney(r.totalAmount)}\n`;
+    msg += "\n¿Coordinamos la entrega? ¡Gracias!";
+    return `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(msg)}`;
+  };
+
   // Checkout WhatsApp generator + Automatic Sale Record
   const handleCheckoutWhatsApp = () => {
     if (cart.length === 0) return;
+    if (!buyerDataOk) {
+      setShowBuyerErrors(true);
+      return;
+    }
     // Con código: sólo si es válido (sin código también se puede comprar)
     const codeToSend = cartCode.trim().toUpperCase();
     if (codeToSend && codeStatus !== "valid") return;
@@ -3125,6 +3278,15 @@ export default function PecadosPage() {
                                 {s.commissionPending ? " · a definir (artículo sin comisión asignada)" : ""}
                               </span>
                             )}
+                            {s.paymentMethod === "mercadopago" && s.channel === "web_whatsapp" && (
+                              <span
+                                className={`mt-1 block text-[10px] font-bold ${s.status === "pending" ? "text-amber-300" : "text-sky-300"}`}
+                              >
+                                {s.status === "pending"
+                                  ? "⏳ Esperando el pago en Mercado Pago (productos reservados)"
+                                  : "✓ Pagada online con Mercado Pago"}
+                              </span>
+                            )}
                             {s.notes?.includes("mercadería en consignación") && (
                               <span className="mt-1 block text-[10px] font-bold text-amber-300">
                                 📦 De su mercadería en consignación
@@ -3600,6 +3762,8 @@ export default function PecadosPage() {
             </div>
 
             <div className="space-y-5">
+              <MercadoPagoSettings />
+
               {/* WhatsApp Config Card */}
               <div className="p-5 rounded-2xl bg-zinc-900/80 border border-zinc-800">
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
@@ -4152,22 +4316,44 @@ export default function PecadosPage() {
                     {/* Buyer Info Form */}
                     <div className="space-y-2.5">
                       <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider block">
-                        Tus datos para el pedido (opcional)
+                        Tus datos para el pedido
                       </span>
-                      <input
-                        type="text"
-                        placeholder="Tu Nombre completo"
-                        value={buyerName}
-                        onChange={(e) => setBuyerName(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-red-500 transition-colors"
-                      />
-                      <input
-                        type="text"
-                        placeholder="Dirección o punto de entrega"
-                        value={buyerAddress}
-                        onChange={(e) => setBuyerAddress(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-red-500 transition-colors"
-                      />
+                      <div>
+                        <input
+                          type="text"
+                          placeholder="Nombre completo *"
+                          value={buyerName}
+                          onChange={(e) => setBuyerName(e.target.value)}
+                          required
+                          autoComplete="name"
+                          maxLength={80}
+                          aria-invalid={showBuyerErrors && buyerName.trim().length < 3}
+                          className={`w-full px-3 py-2 rounded-xl bg-zinc-900 border text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-red-500 transition-colors ${
+                            showBuyerErrors && buyerName.trim().length < 3 ? "border-red-600" : "border-zinc-800"
+                          }`}
+                        />
+                        {showBuyerErrors && buyerName.trim().length < 3 && (
+                          <p className="mt-1 text-[10px] text-red-400">Ingresá tu nombre completo.</p>
+                        )}
+                      </div>
+                      <div>
+                        <input
+                          type="text"
+                          placeholder="Dirección o punto de entrega *"
+                          value={buyerAddress}
+                          onChange={(e) => setBuyerAddress(e.target.value)}
+                          required
+                          autoComplete="street-address"
+                          maxLength={200}
+                          aria-invalid={showBuyerErrors && buyerAddress.trim().length < 3}
+                          className={`w-full px-3 py-2 rounded-xl bg-zinc-900 border text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-red-500 transition-colors ${
+                            showBuyerErrors && buyerAddress.trim().length < 3 ? "border-red-600" : "border-zinc-800"
+                          }`}
+                        />
+                        {showBuyerErrors && buyerAddress.trim().length < 3 && (
+                          <p className="mt-1 text-[10px] text-red-400">Ingresá la dirección o el punto de entrega.</p>
+                        )}
+                      </div>
                       <div>
                         <input
                           type="text"
@@ -4202,24 +4388,142 @@ export default function PecadosPage() {
                     )}
 
                     {/* Checkout Button */}
+                    {checkoutError && (
+                      <p className="p-2.5 rounded-xl bg-red-950/60 border border-red-800 text-red-200 text-xs">{checkoutError}</p>
+                    )}
                     <button
-                      onClick={handleCheckoutWhatsApp}
-                      disabled={codeStatus === "invalid" || codeStatus === "checking"}
-                      className="w-full py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 text-white font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                      onClick={handleFinalizePurchase}
+                      disabled={codeStatus === "invalid" || codeStatus === "checking" || checkoutBusy}
+                      className={`w-full py-3.5 px-4 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 text-white font-bold flex items-center justify-center gap-2 shadow-lg transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer ${
+                        purchaseCartItems.length > 0
+                          ? "bg-red-600 hover:bg-red-500 shadow-red-950/40"
+                          : "bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/40"
+                      }`}
                     >
-                      <Phone className="w-4 h-4" />
+                      {checkoutBusy ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : purchaseCartItems.length > 0 ? (
+                        <ShoppingBag className="w-4 h-4" />
+                      ) : (
+                        <Phone className="w-4 h-4" />
+                      )}
                       <span>
-                        {purchaseCartItems.length > 0 ? "Pedir por WhatsApp" : "Avisar que me interesa por WhatsApp"}
+                        {purchaseCartItems.length > 0
+                          ? checkoutBusy
+                            ? "Preparando el pago…"
+                            : "Finalizar compra"
+                          : "Avisar que me interesa por WhatsApp"}
                       </span>
                     </button>
 
                     <p className="text-[10px] text-center text-zinc-500 leading-tight">
-                      Al tocar el botón se abrirá WhatsApp con el detalle completo de tus productos y tu mensaje listo para enviar.
+                      {purchaseCartItems.length > 0 && mpEnabled
+                        ? "Vas a pagar de forma segura en Mercado Pago: dinero en cuenta, tarjetas de débito y crédito, Mercado Crédito o efectivo."
+                        : "Al tocar el botón se abrirá WhatsApp con el detalle completo de tus productos y tu mensaje listo para enviar."}
                     </p>
                   </div>
                 )}
               </motion.div>
             </div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Resultado del pago al volver de Mercado Pago */}
+      <AnimatePresence>
+        {paymentResult && (
+          <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/85 backdrop-blur-sm"
+              onClick={() => paymentResult.status !== "checking" && setPaymentResult(null)}
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              role="dialog"
+              aria-modal="true"
+              className="relative w-full max-w-md rounded-2xl bg-zinc-900 border border-zinc-800 shadow-2xl p-6 text-center"
+            >
+              {paymentResult.status === "checking" ? (
+                <div className="py-6 flex flex-col items-center gap-3 text-zinc-300">
+                  <Loader2 className="w-8 h-8 animate-spin text-red-400" />
+                  <p className="text-sm">Confirmando tu pago con Mercado Pago…</p>
+                </div>
+              ) : (
+                <>
+                  <div className="text-5xl mb-3">
+                    {paymentResult.status === "completed" ? "🎉" : paymentResult.status === "pending" ? "⏳" : "⚠️"}
+                  </div>
+                  <h3 className="text-xl font-black text-white">
+                    {paymentResult.status === "completed"
+                      ? "¡Gracias por tu compra!"
+                      : paymentResult.status === "pending"
+                      ? "Tu pago está pendiente"
+                      : "El pago no se completó"}
+                  </h3>
+                  <p className="mt-2 text-sm text-zinc-300">
+                    {paymentResult.status === "completed"
+                      ? "Recibimos tu pago. Escribinos por WhatsApp para coordinar la entrega."
+                      : paymentResult.status === "pending"
+                      ? "Cuando Mercado Pago acredite el pago (por ejemplo, si elegiste pagar en efectivo) tu compra queda confirmada. Tus productos quedan reservados."
+                      : paymentResult.status === "error"
+                      ? "No pudimos confirmar el pago. Si te debitaron el dinero, escribinos por WhatsApp con tu número de compra."
+                      : "No se realizó ningún cobro. Tu carrito sigue disponible para que vuelvas a intentarlo."}
+                  </p>
+                  <p className="mt-2 text-[11px] text-zinc-500 font-mono">Compra N° {paymentResult.saleId.slice(-8).toUpperCase()}</p>
+                  {(paymentResult.status === "completed" || paymentResult.status === "pending") && paymentResult.items && (
+                    <div className="mt-4 p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-left space-y-1">
+                      {paymentResult.items.map((i, idx) => (
+                        <div key={idx} className="flex justify-between gap-2 text-xs text-zinc-300">
+                          <span>
+                            <strong className="text-white">{i.quantity}x</strong> {i.title}
+                          </span>
+                          <span className="font-mono">{formatMoney(i.subtotal)}</span>
+                        </div>
+                      ))}
+                      <div className="pt-1.5 mt-1.5 border-t border-zinc-800 flex justify-between text-sm font-bold text-white">
+                        <span>Total</span>
+                        <span className="font-mono">{formatMoney(paymentResult.totalAmount || 0)}</span>
+                      </div>
+                    </div>
+                  )}
+                  <div className="mt-5 flex flex-col gap-2">
+                    {paymentResult.status === "completed" || paymentResult.status === "error" ? (
+                      <a
+                        href={paidOrderWhatsAppUrl(paymentResult)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm flex items-center justify-center gap-2"
+                      >
+                        <Phone className="w-4 h-4" /> Escribir por WhatsApp
+                      </a>
+                    ) : paymentResult.status !== "pending" ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPaymentResult(null);
+                          setIsCartOpen(true);
+                        }}
+                        className="w-full py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-sm cursor-pointer"
+                      >
+                        Volver al carrito
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setPaymentResult(null)}
+                      className="w-full py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold text-sm cursor-pointer"
+                    >
+                      Seguir mirando la tienda
+                    </button>
+                  </div>
+                </>
+              )}
+            </motion.div>
           </div>
         )}
       </AnimatePresence>

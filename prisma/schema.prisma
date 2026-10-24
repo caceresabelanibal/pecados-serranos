@@ -74,6 +74,9 @@ model PecadoSale {
   settledAt     DateTime?
   // Venta anulada (status = "cancelled"): se devolvió el stock y no cuenta en ningún total
   cancelledAt   DateTime?
+  // Compra online pagada con Mercado Pago (status "pending" hasta que se acredita)
+  mpPreferenceId String?
+  mpPaymentId    String?
   createdAt     DateTime         @default(now())
   items         PecadoSaleItem[]
 
