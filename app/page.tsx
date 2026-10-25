@@ -122,6 +122,8 @@ export default function PecadosPage() {
   // Compras online todavía sin cobrar (no son ventas ni descuentan stock hasta confirmarse)
   const [pendingOrders, setPendingOrders] = useState<Sale[]>([]);
   const [pendingBusy, setPendingBusy] = useState<string | null>(null);
+  // Revendedores: la que se muestra (una solapa por revendedora)
+  const [resellerTab, setResellerTab] = useState<string | null>(null);
   const [resellers, setResellers] = useState<Reseller[]>([]);
   const [consignments, setConsignments] = useState<Consignment[]>([]);
 
@@ -2340,6 +2342,10 @@ export default function PecadosPage() {
     return matchesSearch && matchesType;
   });
 
+  // Revendedores: solapa activa y sus lotes de mercadería
+  const activeReseller = resellers.find((r) => r.id === resellerTab) || resellers[0] || null;
+  const shownConsignments = activeReseller ? consignments.filter((c) => c.resellerId === activeReseller.id) : consignments;
+
   // Sales KPI Computations with Date Filtering
   const filteredSales = sales.filter((s) => {
     const q = salesQuery.trim().toLowerCase();
@@ -3556,9 +3562,40 @@ export default function PecadosPage() {
               </div>
             </div>
 
-            {/* Resellers Cards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {resellers.map((r) => {
+            {/* Una solapa por revendedora (si hay más de una) */}
+            {resellers.length > 1 && (
+              <div className="flex gap-1.5 overflow-x-auto border-b border-zinc-800 pb-px" role="tablist" aria-label="Revendedoras">
+                {resellers.map((r) => {
+                  const active = r.id === activeReseller?.id;
+                  const owed = sales
+                    .filter((s) => s.resellerId === r.id && !s.settledAt)
+                    .reduce((t, s) => t + owedToStore(s), 0);
+                  return (
+                    <button
+                      key={r.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => setResellerTab(r.id)}
+                      className={`px-4 py-2 rounded-t-xl text-xs font-bold whitespace-nowrap border border-b-0 flex items-center gap-1.5 cursor-pointer ${
+                        active ? "bg-zinc-900 border-zinc-700 text-white" : "bg-zinc-950/60 border-transparent text-zinc-400 hover:text-white"
+                      }`}
+                    >
+                      {r.name}
+                      {owed > 0 && (
+                        <span className="px-1.5 rounded-full bg-sky-900 text-sky-200 text-[10px] font-mono" title="Pendiente de rendir">
+                          {formatMoney(owed)}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Revendedora activa: ficha a todo el ancho */}
+            <div className="grid grid-cols-1 gap-5">
+              {resellers.filter((r) => r.id === activeReseller?.id).map((r) => {
                 // Compute reseller metrics
                 const resellerConsignments = consignments.filter((c) => c.resellerId === r.id);
                 const activeUnitsInStreet = resellerConsignments
@@ -3711,7 +3748,7 @@ export default function PecadosPage() {
                         {soldRows.length === 0 ? (
                           <p className="text-[11px] text-zinc-500">Todavía no vendió artículos.</p>
                         ) : (
-                          <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                          <div className="grid gap-1.5 lg:grid-cols-2 max-h-[28rem] overflow-y-auto pr-1">
                             {soldRows.map((row) => (
                               <div key={row.productId || row.sku} className="p-2 rounded-lg bg-zinc-950/70 border border-zinc-800/60 text-[11px]">
                                 <div className="flex items-start justify-between gap-2">
@@ -3775,11 +3812,16 @@ export default function PecadosPage() {
             <div className="space-y-4">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 <Package className="w-5 h-5 text-amber-500" /> Lotes de Mercadería en Consignación / Rendiciones
+                {activeReseller && <span className="text-sm font-semibold text-amber-300">· {activeReseller.name}</span>}
               </h3>
 
-              {consignments.length === 0 ? (
+              {shownConsignments.length === 0 ? (
                 <div className="py-12 text-center bg-zinc-900/40 rounded-2xl border border-zinc-800">
-                  <p className="text-xs text-zinc-500">No hay lotes de mercadería entregados a revendedores todavía.</p>
+                  <p className="text-xs text-zinc-500">
+                    {activeReseller
+                      ? `Todavía no se le entregó mercadería a ${activeReseller.name}.`
+                      : "No hay lotes de mercadería entregados a revendedores todavía."}
+                  </p>
                 </div>
               ) : (
                 <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 overflow-hidden shadow-xl">
@@ -3800,7 +3842,7 @@ export default function PecadosPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-800/60">
-                        {consignments.map((c) => {
+                        {shownConsignments.map((c) => {
                           const pending = c.quantityGiven - c.quantitySold - c.quantityReturned;
                           return (
                             <tr key={c.id} className="hover:bg-zinc-800/40 transition-colors">
