@@ -50,6 +50,7 @@ import {
   FileText,
   HandHeart,
   Wallet,
+  PiggyBank,
   AlertTriangle,
   ZoomIn,
   UserCheck,
@@ -61,6 +62,7 @@ import AsociadoPanel from "@/app/components/AsociadoPanel";
 import AgeGate from "@/app/components/AgeGate";
 import MercadoPagoSettings from "@/app/components/MercadoPagoSettings";
 import BackupSettings from "@/app/components/BackupSettings";
+import CashSummaryTab from "@/app/components/CashSummaryTab";
 import {
   flujoDeCaja,
   formatMoney,
@@ -125,7 +127,7 @@ export default function PecadosPage() {
 
   // Admin state & navigation
   const [isAdmin, setIsAdmin] = useState(false);
-  const [adminTab, setAdminTab] = useState<"catalog" | "cashflow" | "stock" | "interests" | "purchases" | "sales" | "resellers" | "settings">("catalog");
+  const [adminTab, setAdminTab] = useState<"catalog" | "cashflow" | "finance" | "stock" | "interests" | "purchases" | "sales" | "resellers" | "settings">("catalog");
   const [pendingInterestCount, setPendingInterestCount] = useState(0);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [loginUser, setLoginUser] = useState("");
@@ -1725,7 +1727,7 @@ export default function PecadosPage() {
     });
     if (missing.length > 0) {
       alert(
-        `El artículo se guardó, pero está INCOMPLETO y no se mostrará en la tienda.\n\nFalta: ${missing.join(", ")}.\n\nPodés completarlo en la pestaña "Flujo de caja".`
+        `El artículo se guardó, pero está INCOMPLETO y no se mostrará en la tienda.\n\nFalta: ${missing.join(", ")}.\n\nPodés completarlo en la pestaña "Flujo de stock".`
       );
     }
   };
@@ -2490,7 +2492,7 @@ export default function PecadosPage() {
                     : "text-zinc-300 hover:text-white hover:bg-red-900/40"
                 }`}
               >
-                <Wallet className="w-3.5 h-3.5" /> Flujo de caja
+                <Wallet className="w-3.5 h-3.5" /> Flujo de stock
                 {incompleteProductsCount > 0 && (
                   <span
                     className="min-w-[18px] h-[18px] px-1 rounded-full bg-amber-400 text-black text-[10px] font-black flex items-center justify-center"
@@ -2499,6 +2501,16 @@ export default function PecadosPage() {
                     {incompleteProductsCount}
                   </span>
                 )}
+              </button>
+              <button
+                onClick={() => setAdminTab("finance")}
+                className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap text-xs ${
+                  adminTab === "finance"
+                    ? "bg-red-600 text-white shadow-sm"
+                    : "text-zinc-300 hover:text-white hover:bg-red-900/40"
+                }`}
+              >
+                <PiggyBank className="w-3.5 h-3.5" /> Flujo de caja
               </button>
               <button
                 onClick={() => setAdminTab("stock")}
@@ -2628,6 +2640,8 @@ export default function PecadosPage() {
         {/* ============================================================== */}
         {/* ADMIN TAB: STOCK CONTROL (Inventario Completo)                   */}
         {/* ============================================================== */}
+        {isAdmin && adminTab === "finance" && <CashSummaryTab purchases={purchases} sales={sales} resellers={resellers} />}
+
         {isAdmin && adminTab === "cashflow" && (
           <CashFlowTab
             products={products}
@@ -2656,7 +2670,7 @@ export default function PecadosPage() {
                   <Boxes className="w-6 h-6 text-red-500" /> Stock
                 </h2>
                 <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-                  Cantidad y precios públicos de cada artículo (mismos valores que <strong>Flujo de caja</strong>).
+                  Cantidad y precios públicos de cada artículo (mismos valores que <strong>Flujo de stock</strong>).
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
@@ -2733,7 +2747,7 @@ export default function PecadosPage() {
                 type="button"
                 onClick={() => setAdminTab("cashflow")}
                 className="p-3 sm:p-4 rounded-2xl bg-zinc-900/80 border border-zinc-800 text-left hover:border-amber-700 transition-colors cursor-pointer"
-                title="Completar en Flujo de caja"
+                title="Completar en Flujo de stock"
               >
                 <span className="text-[10px] sm:text-[11px] font-semibold text-zinc-400 uppercase sm:tracking-wider block leading-tight">Incompletos</span>
                 <span className="text-2xl sm:text-3xl font-black text-amber-400 mt-1 block font-mono">{incompleteProductsCount}</span>
@@ -2901,7 +2915,7 @@ export default function PecadosPage() {
             </div>
 
             {/* KPI Cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
               <div className="p-4 rounded-2xl bg-zinc-900/90 border border-zinc-800">
                 <div className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
                   <Receipt className="w-3.5 h-3.5 text-zinc-400" /> Compras Cargadas
@@ -2926,29 +2940,6 @@ export default function PecadosPage() {
                   ${purchases.reduce((acc, p) => acc + (p.totalCostSinIva || 0), 0).toLocaleString("es-AR")}
                 </div>
                 <div className="text-[11px] text-zinc-500 mt-0.5">Costo base mercadería</div>
-              </div>
-              <div className="p-4 rounded-2xl bg-zinc-900/90 border border-red-900/40 bg-gradient-to-br from-zinc-900 to-red-950/20">
-                <div className="text-[11px] font-bold text-red-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <DollarSign className="w-3.5 h-3.5 text-red-400" /> Inversión Total (c/IVA)
-                </div>
-                <div className="text-lg sm:text-2xl font-black text-red-300 mt-1 break-words">
-                  ${purchases.reduce((acc, p) => acc + (p.totalCostConIva || 0), 0).toLocaleString("es-AR")}
-                </div>
-                <div className="text-[11px] text-zinc-500 mt-0.5">Total abonado proveedor</div>
-              </div>
-              <div className="p-4 rounded-2xl bg-zinc-900/90 border border-emerald-900/40 bg-gradient-to-br from-zinc-900 to-emerald-950/20 col-span-2 lg:col-span-1">
-                <div className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> Venta Proyectada
-                </div>
-                <div className="text-lg sm:text-2xl font-black text-emerald-300 mt-1 break-words">
-                  ${purchases.reduce((acc, p) => acc + (p.totalSaleEstimated || 0), 0).toLocaleString("es-AR")}
-                </div>
-                <div className="text-[11px] text-emerald-500 mt-0.5">
-                  Margen: +${(
-                    purchases.reduce((acc, p) => acc + (p.totalSaleEstimated || 0), 0) -
-                    purchases.reduce((acc, p) => acc + (p.totalCostConIva || 0), 0)
-                  ).toLocaleString("es-AR")}
-                </div>
               </div>
             </div>
 
@@ -4156,7 +4147,7 @@ export default function PecadosPage() {
                             {isAdmin && missingFields(product).length > 0 && (
                               <span
                                 className="mt-0.5 flex items-start gap-1 text-[9px] font-bold text-amber-300 leading-tight"
-                                title="No se muestra en la tienda hasta completar estos datos (pestaña Flujo de caja)"
+                                title="No se muestra en la tienda hasta completar estos datos (pestaña Flujo de stock)"
                               >
                                 <AlertTriangle className="w-2.5 h-2.5 shrink-0 mt-px" />
                                 Incompleto: falta {missingFields(product).join(", ")}
@@ -5285,7 +5276,7 @@ export default function PecadosPage() {
                 <div className="p-3.5 rounded-xl bg-zinc-950/80 border border-zinc-800/80 space-y-3">
                   <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
                     <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                      <Wallet className="w-3.5 h-3.5 text-red-400" /> Flujo de caja
+                      <Wallet className="w-3.5 h-3.5 text-red-400" /> Flujo de stock
                     </span>
                     <span className="text-[10px] text-zinc-400">IVA 21% • Multiplicador • TC = FT +10%</span>
                   </div>

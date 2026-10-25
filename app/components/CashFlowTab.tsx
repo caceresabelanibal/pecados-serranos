@@ -163,7 +163,7 @@ export default function CashFlowTab({
     const ws = XLSX.utils.json_to_sheet(data);
     ws["!cols"] = [{ wch: 20 }, { wch: 16 }, { wch: 50 }, ...Array(10).fill({ wch: 16 })];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Flujo de caja");
+    XLSX.utils.book_append_sheet(wb, ws, "Flujo de stock");
     XLSX.writeFile(wb, `Flujo_de_caja_Pecados_Serranos_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
@@ -176,7 +176,7 @@ export default function CashFlowTab({
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-zinc-800">
         <div>
           <h2 className="text-2xl font-black text-white flex items-center gap-2">
-            <Wallet className="w-6 h-6 text-red-500" /> Flujo de caja
+            <Wallet className="w-6 h-6 text-red-500" /> Flujo de stock
           </h2>
           <p className="text-xs sm:text-sm text-zinc-400 mt-1">
             Mismas fórmulas que la planilla VShop. Editá <strong>Proveedor SIN IVA</strong>, <strong>multiplicador</strong>,{" "}
