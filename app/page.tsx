@@ -124,6 +124,7 @@ export default function PecadosPage() {
   const [pendingBusy, setPendingBusy] = useState<string | null>(null);
   // Revendedores: la que se muestra (una solapa por revendedora)
   const [resellerTab, setResellerTab] = useState<string | null>(null);
+  const [savingReseller, setSavingReseller] = useState(false);
   const [resellers, setResellers] = useState<Reseller[]>([]);
   const [consignments, setConsignments] = useState<Consignment[]>([]);
 
@@ -1817,13 +1818,66 @@ export default function PecadosPage() {
 
   const handleSaveReseller = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (savingReseller) return;
     if (!resellerForm.name.trim()) {
       alert("Ingresá el nombre del revendedor.");
       return;
     }
-    const resellerId = editingReseller ? editingReseller.id : "res-" + Date.now();
+    // Validación previa (el servidor vuelve a validar todo antes de guardar)
+    const password = resellerForm.password;
+    if (password && password.length < 8) {
+      alert("La contraseña debe tener al menos 8 caracteres.");
+      return;
+    }
+    if (resellerForm.username.trim() && !password && !editingReseller?.hasPassword) {
+      alert("Asigná una contraseña para habilitar el acceso.");
+      return;
+    }
 
-    if (editingReseller) {
+    setSavingReseller(true);
+    try {
+      if (!editingReseller) {
+        // Alta en un solo paso: si algún dato no es válido no se crea nada (no quedan duplicados)
+        const res = await fetch("/api/admin/revendedores", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: resellerForm.name,
+            phone: resellerForm.phone,
+            zone: resellerForm.zone,
+            notes: resellerForm.notes,
+            code: resellerForm.code,
+            username: resellerForm.username,
+            password,
+          }),
+        });
+        const out = await res.json().catch(() => null);
+        if (!res.ok) {
+          alert(`No se dio de alta al revendedor:\n${out?.error || "Error al guardar."}`);
+          return;
+        }
+        await fetchServerData();
+        if (out?.id) setResellerTab(out.id);
+        setShowResellerModal(false);
+        return;
+      }
+
+      // Edición: primero código y acceso (se validan); si fallan, no se cambia nada
+      const res = await fetch("/api/admin/revendedores", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: editingReseller.id,
+          code: resellerForm.code,
+          username: resellerForm.username,
+          password,
+        }),
+      });
+      const out = await res.json().catch(() => null);
+      if (!res.ok) {
+        alert(`No se guardaron los cambios:\n${out?.error || "Error al guardar."}`);
+        return;
+      }
       const updated = resellers.map((r) =>
         r.id === editingReseller.id
           ? {
@@ -1835,48 +1889,19 @@ export default function PecadosPage() {
               commissionType: resellerForm.commissionType,
               commissionFixed: Number(resellerForm.commissionFixed) || 0,
               notes: resellerForm.notes.trim(),
+              code: out.code || undefined,
+              username: out.username || undefined,
+              hasPassword: out.hasPassword,
             }
           : r
       );
       await persistAllData(products, sales, updated, consignments);
-    } else {
-      const newRes: Reseller = {
-        id: resellerId,
-        name: resellerForm.name.trim(),
-        phone: resellerForm.phone.replace(/[^0-9]/g, ""),
-        zone: resellerForm.zone.trim() || "Local",
-        commissionPercent: Number(resellerForm.commissionPercent) || 0,
-        commissionType: resellerForm.commissionType,
-        commissionFixed: Number(resellerForm.commissionFixed) || 0,
-        notes: resellerForm.notes.trim(),
-        createdAt: new Date().toISOString(),
-      };
-      await persistAllData(products, sales, [newRes, ...resellers], consignments);
+      setShowResellerModal(false);
+    } catch {
+      alert("No se pudo conectar con el servidor.");
+    } finally {
+      setSavingReseller(false);
     }
-
-    // Código y acceso al perfil Asociado
-    const res = await fetch("/api/admin/revendedores", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: resellerId,
-        code: resellerForm.code,
-        username: resellerForm.username,
-        password: resellerForm.password,
-      }),
-    });
-    const out = await res.json().catch(() => null);
-    if (!res.ok) {
-      alert(`Los datos del revendedor se guardaron, pero no el código/acceso:\n${out?.error || "Error al guardar."}`);
-      fetchServerData();
-      return;
-    }
-    setResellers((prev) =>
-      prev.map((r) =>
-        r.id === resellerId ? { ...r, code: out.code || undefined, username: out.username || undefined, hasPassword: out.hasPassword } : r
-      )
-    );
-    setShowResellerModal(false);
   };
 
   const handleDeleteReseller = async (id: string) => {
@@ -5979,9 +6004,10 @@ export default function PecadosPage() {
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold"
+                    disabled={savingReseller}
+                    className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-60 text-white font-bold flex items-center gap-1.5"
                   >
-                    Guardar Revendedor
+                    {savingReseller && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Guardar Revendedor
                   </button>
                 </div>
               </form>
