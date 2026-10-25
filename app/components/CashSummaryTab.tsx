@@ -25,6 +25,8 @@ const daysAgo = (n: number) => {
 
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" });
 const round2 = (n: number) => Math.round(n * 100) / 100;
+// Montos de la planilla: siempre con 2 decimales (como una planilla contable)
+const money = (n: number) => `$${(Number(n) || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 type Preset = "30d" | "mes" | "mes_pasado" | "todo" | "custom";
 
@@ -41,6 +43,7 @@ interface Movimiento {
   medio: string;
   debe: number;
   haber: number;
+  notas?: string;
 }
 
 // Pestaña "Flujo de caja": inversión, venta proyectada, facturación, balance de sumas y saldos y comisiones
@@ -113,13 +116,14 @@ export default function CashSummaryTab({ purchases, sales, resellers }: Props) {
         date: p.date,
         cuenta: "Compras a proveedores",
         comprobante: p.fileName || "Compra",
-        detalle: `${p.totalUnits || 0} u. · ${p.totalItems || 0} artículos${p.notes ? ` — ${p.notes}` : ""}`,
+        detalle: `Compra de mercadería: ${p.totalUnits || 0} u. en ${p.totalItems || 0} artículos`,
+        notas: p.notes || "",
         medio: "",
         debe: 0,
         haber: p.totalCostConIva || 0,
       });
     }
-    return list.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime() || a.key.localeCompare(b.key));
+    return list.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }, [sales, purchases, resellers]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Período: saldo anterior (lo previo al "desde") y movimientos dentro del rango
@@ -217,7 +221,7 @@ export default function CashSummaryTab({ purchases, sales, resellers }: Props) {
   // Impresión (o "Guardar como PDF"): planilla en blanco y negro en una ventana aparte
   const print = () => {
     const esc = (v: unknown) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] as string);
-    const money = (n: number) => (n ? esc(formatMoney(n)) : "");
+    const cell = (n: number) => (n ? esc(money(n)) : "");
     const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Flujo de caja · Pecados Serranos</title>
 <style>
   body{font:11px/1.35 Arial,Helvetica,sans-serif;color:#111;margin:24px}
@@ -231,27 +235,27 @@ export default function CashSummaryTab({ purchases, sales, resellers }: Props) {
 <h1>Flujo de caja — Pecados Serranos</h1>
 <div class="muted">Período: ${esc(periodLabel)}${query ? ` · Búsqueda: "${esc(query)}"` : ""} · Emitido el ${esc(new Date().toLocaleString("es-AR"))}</div>
 <div class="cards" style="margin-top:10px">
-  <div>Inversión total (c/IVA)<b>${esc(formatMoney(inversionConIva))}</b></div>
-  <div>Venta proyectada<b>${esc(formatMoney(ventaProyectada))}</b></div>
-  <div>Facturación total (histórica)<b>${esc(formatMoney(facturacionTotal))}</b></div>
+  <div>Inversión total (c/IVA)<b>${esc(money(inversionConIva))}</b></div>
+  <div>Venta proyectada<b>${esc(money(ventaProyectada))}</b></div>
+  <div>Facturación total (histórica)<b>${esc(money(facturacionTotal))}</b></div>
 </div>
 <h2>Balance de sumas y saldos</h2>
 <table><thead><tr><th>Cuenta</th><th class="n">Mov.</th><th class="n">Debe</th><th class="n">Haber</th><th class="n">Saldo</th></tr></thead><tbody>
-${balance.map((b) => `<tr><td>${esc(b.cuenta)}</td><td class="n">${b.movimientos}</td><td class="n">${money(b.debe)}</td><td class="n">${money(b.haber)}</td><td class="n">${esc(formatMoney(b.saldo))}</td></tr>`).join("")}
+${balance.map((b) => `<tr><td>${esc(b.cuenta)}</td><td class="n">${b.movimientos}</td><td class="n">${cell(b.debe)}</td><td class="n">${cell(b.haber)}</td><td class="n">${esc(money(b.saldo))}</td></tr>`).join("")}
 </tbody><tfoot>
-<tr><td>Sumas</td><td class="n">${delPeriodo.length}</td><td class="n">${esc(formatMoney(sumaDebe))}</td><td class="n">${esc(formatMoney(sumaHaber))}</td><td class="n">${esc(formatMoney(round2(sumaDebe - sumaHaber)))}</td></tr>
-<tr><td colspan="4">Saldo anterior</td><td class="n">${esc(formatMoney(saldoAnterior))}</td></tr>
-<tr><td colspan="4">Saldo final</td><td class="n">${esc(formatMoney(saldoFinal))}</td></tr>
+<tr><td>Sumas</td><td class="n">${delPeriodo.length}</td><td class="n">${esc(money(sumaDebe))}</td><td class="n">${esc(money(sumaHaber))}</td><td class="n">${esc(money(round2(sumaDebe - sumaHaber)))}</td></tr>
+${start ? `<tr><td colspan="4">Saldo anterior</td><td class="n">${esc(money(saldoAnterior))}</td></tr>` : ""}
+<tr><td colspan="4">Saldo final</td><td class="n">${esc(money(saldoFinal))}</td></tr>
 </tfoot></table>
 <h2>Movimientos</h2>
 <table><thead><tr><th>Fecha</th><th>Cuenta</th><th>Comprobante</th><th>Detalle</th><th>Medio</th><th class="n">Debe</th><th class="n">Haber</th><th class="n">Saldo</th></tr></thead><tbody>
-${start ? `<tr class="tot"><td colspan="7">Saldo anterior</td><td class="n">${esc(formatMoney(saldoAnterior))}</td></tr>` : ""}
-${visibles.map((m) => `<tr><td>${esc(fmtDate(m.date))}</td><td>${esc(m.cuenta)}</td><td>${esc(m.comprobante)}</td><td>${esc(m.detalle)}</td><td>${esc(m.medio)}</td><td class="n">${money(m.debe)}</td><td class="n">${money(m.haber)}</td><td class="n">${esc(formatMoney(m.saldo))}</td></tr>`).join("") || `<tr><td colspan="8">Sin movimientos en el período.</td></tr>`}
+${start ? `<tr class="tot"><td colspan="7">Saldo anterior</td><td class="n">${esc(money(saldoAnterior))}</td></tr>` : ""}
+${visibles.map((m) => `<tr><td>${esc(fmtDate(m.date))}</td><td>${esc(m.cuenta)}</td><td>${esc(m.comprobante)}</td><td>${esc(m.detalle)}</td><td>${esc(m.medio)}</td><td class="n">${cell(m.debe)}</td><td class="n">${cell(m.haber)}</td><td class="n">${esc(money(m.saldo))}</td></tr>`).join("") || `<tr><td colspan="8">Sin movimientos en el período.</td></tr>`}
 </tbody></table>
 <h2>Comisiones de revendedoras</h2>
 <table><thead><tr><th>Revendedora</th><th class="n">Ventas</th><th class="n">Unidades</th><th class="n">Total comisiones</th></tr></thead><tbody>
-${commissions.rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="n">${r.sales}</td><td class="n">${r.units}</td><td class="n">${esc(formatMoney(r.total))}</td></tr>`).join("") || `<tr><td colspan="4">Sin comisiones en el período.</td></tr>`}
-</tbody><tfoot><tr><td colspan="3">Total</td><td class="n">${esc(formatMoney(commissions.total))}</td></tr></tfoot></table>
+${commissions.rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="n">${r.sales}</td><td class="n">${r.units}</td><td class="n">${esc(money(r.total))}</td></tr>`).join("") || `<tr><td colspan="4">Sin comisiones en el período.</td></tr>`}
+</tbody><tfoot><tr><td colspan="3">Total</td><td class="n">${esc(money(commissions.total))}</td></tr></tfoot></table>
 </body></html>`;
     const w = window.open("", "_blank");
     if (!w) {
@@ -404,9 +408,9 @@ ${commissions.rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="n">${r.sale
                   <tr key={b.cuenta} className="hover:bg-zinc-800/40">
                     <td className="p-2 font-semibold text-zinc-200 whitespace-nowrap">{b.cuenta}</td>
                     <td className={`${td} text-zinc-300`}>{b.movimientos}</td>
-                    <td className={`${td} text-emerald-300`}>{b.debe ? formatMoney(b.debe) : "—"}</td>
-                    <td className={`${td} text-rose-300`}>{b.haber ? formatMoney(b.haber) : "—"}</td>
-                    <td className={`${td} font-bold ${b.saldo < 0 ? "text-rose-300" : "text-white"}`}>{formatMoney(b.saldo)}</td>
+                    <td className={`${td} text-emerald-300`}>{b.debe ? money(b.debe) : "—"}</td>
+                    <td className={`${td} text-rose-300`}>{b.haber ? money(b.haber) : "—"}</td>
+                    <td className={`${td} font-bold ${b.saldo < 0 ? "text-rose-300" : "text-white"}`}>{money(b.saldo)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -414,23 +418,23 @@ ${commissions.rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="n">${r.sale
                 <tr>
                   <td className="p-2 font-black text-white uppercase">Sumas</td>
                   <td className={`${td} text-zinc-300`}>{delPeriodo.length}</td>
-                  <td className={`${td} font-black text-emerald-300`}>{formatMoney(sumaDebe)}</td>
-                  <td className={`${td} font-black text-rose-300`}>{formatMoney(sumaHaber)}</td>
-                  <td className={`${td} font-black text-white`}>{formatMoney(round2(sumaDebe - sumaHaber))}</td>
+                  <td className={`${td} font-black text-emerald-300`}>{money(sumaDebe)}</td>
+                  <td className={`${td} font-black text-rose-300`}>{money(sumaHaber)}</td>
+                  <td className={`${td} font-black text-white`}>{money(round2(sumaDebe - sumaHaber))}</td>
                 </tr>
                 {start && (
                   <tr>
                     <td className="p-2 text-zinc-400" colSpan={4}>
                       Saldo anterior (antes del {fmtDate(`${from}T00:00:00`)})
                     </td>
-                    <td className={`${td} text-zinc-300`}>{formatMoney(saldoAnterior)}</td>
+                    <td className={`${td} text-zinc-300`}>{money(saldoAnterior)}</td>
                   </tr>
                 )}
                 <tr>
                   <td className="p-2 font-black text-white uppercase" colSpan={4}>
                     Saldo final
                   </td>
-                  <td className={`${td} font-black text-base ${saldoFinal < 0 ? "text-rose-300" : "text-amber-300"}`}>{formatMoney(saldoFinal)}</td>
+                  <td className={`${td} font-black text-base ${saldoFinal < 0 ? "text-rose-300" : "text-amber-300"}`}>{money(saldoFinal)}</td>
                 </tr>
               </tfoot>
             </table>
@@ -465,7 +469,7 @@ ${commissions.rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="n">${r.sale
                     <td className="p-2 text-zinc-400 italic" colSpan={6}>
                       Saldo anterior
                     </td>
-                    <td className={`${td} text-zinc-300`}>{formatMoney(saldoAnterior)}</td>
+                    <td className={`${td} text-zinc-300`}>{money(saldoAnterior)}</td>
                   </tr>
                 )}
                 {visibles.length === 0 ? (
@@ -486,11 +490,14 @@ ${commissions.rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="n">${r.sale
                         {m.cuenta}
                       </td>
                       <td className={`${td} text-red-400 font-bold`}>{m.comprobante}</td>
-                      <td className="p-2 text-zinc-300">{m.detalle}</td>
+                      <td className="p-2 text-zinc-300" title={m.notas || undefined}>
+                        {m.detalle}
+                        {m.notas && <span className="ml-1 text-zinc-500 cursor-help">ⓘ</span>}
+                      </td>
                       <td className="p-2 text-center text-zinc-400 whitespace-nowrap">{m.medio || "—"}</td>
-                      <td className={`${td} text-emerald-300`}>{m.debe ? formatMoney(m.debe) : ""}</td>
-                      <td className={`${td} text-rose-300`}>{m.haber ? formatMoney(m.haber) : ""}</td>
-                      <td className={`${td} font-bold ${m.saldo < 0 ? "text-rose-300" : "text-white"}`}>{formatMoney(m.saldo)}</td>
+                      <td className={`${td} text-emerald-300`}>{m.debe ? money(m.debe) : ""}</td>
+                      <td className={`${td} text-rose-300`}>{m.haber ? money(m.haber) : ""}</td>
+                      <td className={`${td} font-bold ${m.saldo < 0 ? "text-rose-300" : "text-white"}`}>{money(m.saldo)}</td>
                     </tr>
                   ))
                 )}
