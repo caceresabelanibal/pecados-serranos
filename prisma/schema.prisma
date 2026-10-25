@@ -200,3 +200,18 @@ model PecadoProductImage {
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 }
+
+// Registro manual de caja (Flujo de caja): ingresos o egresos que no salen de ventas ni compras
+// de mercadería, ej: perchas, posnet, alquiler, aporte de capital
+model PecadoCashEntry {
+  id          String   @id @default(cuid())
+  date        DateTime
+  // "debe" = entra dinero | "haber" = sale dinero
+  side        String
+  category    String
+  description String   @default("")
+  amount      Float
+  createdAt   DateTime @default(now())
+
+  @@index([date])
+}

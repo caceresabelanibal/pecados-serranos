@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
-import { DollarSign, FileSpreadsheet, PiggyBank, Printer, Receipt, Search, TrendingUp } from "lucide-react";
+import { DollarSign, FileSpreadsheet, Loader2, PiggyBank, Plus, Printer, Receipt, Search, Trash2, TrendingUp, X } from "lucide-react";
 import { PAYMENT_METHOD_LABELS, type PurchaseRecord, type Reseller, type Sale } from "@/app/products";
 import { formatMoney } from "@/lib/pricing";
 import { buildSearchText, matchesSearch } from "@/lib/search";
@@ -31,8 +31,32 @@ const money = (n: number) => `$${(Number(n) || 0).toLocaleString("es-AR", { mini
 type Preset = "30d" | "mes" | "mes_pasado" | "todo" | "custom";
 
 // Cuentas del balance (caja: el Debe es lo que entra, el Haber lo que sale)
-type Cuenta = "Ventas" | "Compras a proveedores" | "Comisiones de revendedoras";
+// Cuentas fijas (salen de ventas, compras y comisiones); los registros manuales suman una cuenta por categoría
+type Cuenta = string;
 const CUENTAS: Cuenta[] = ["Ventas", "Compras a proveedores", "Comisiones de revendedoras"];
+
+// Categorías sugeridas para los registros manuales (también se puede escribir otra)
+const CATEGORIAS_HABER = [
+  "Equipamiento y mobiliario",
+  "Insumos y packaging",
+  "Servicios",
+  "Alquiler",
+  "Publicidad",
+  "Impuestos y gastos bancarios",
+  "Envíos",
+  "Retiro del dueño",
+  "Otros egresos",
+];
+const CATEGORIAS_DEBE = ["Aporte de capital", "Préstamo recibido", "Otros ingresos"];
+
+interface CashEntry {
+  id: string;
+  date: string;
+  side: "debe" | "haber";
+  category: string;
+  description: string;
+  amount: number;
+}
 
 interface Movimiento {
   key: string;
@@ -44,6 +68,7 @@ interface Movimiento {
   debe: number;
   haber: number;
   notas?: string;
+  manualId?: string; // registro manual (se puede borrar)
 }
 
 // Pestaña "Flujo de caja": inversión, venta proyectada, facturación y balance de sumas y saldos
@@ -53,6 +78,67 @@ export default function CashSummaryTab({ purchases, sales, resellers }: Props) {
   const [to, setTo] = useState(() => toInputDate(new Date()));
   const [preset, setPreset] = useState<Preset>("30d");
   const [query, setQuery] = useState("");
+
+  // Registros manuales de caja (ej: perchas, posnet, aporte de capital)
+  const [entries, setEntries] = useState<CashEntry[]>([]);
+  const loadEntries = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/caja", { cache: "no-store" });
+      if (res.ok) setEntries((await res.json()).entries || []);
+    } catch {}
+  }, []);
+  useEffect(() => {
+    loadEntries();
+  }, [loadEntries]);
+
+  const emptyForm = () => ({ date: toInputDate(new Date()), side: "haber" as "debe" | "haber", category: "", customCategory: "", description: "", amount: "" });
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(emptyForm);
+  const [formError, setFormError] = useState("");
+  const [savingEntry, setSavingEntry] = useState(false);
+  // Categorías ya usadas (para elegirlas de nuevo) + las sugeridas del lado elegido
+  const categoryOptions = useMemo(() => {
+    const used = entries.filter((e) => e.side === form.side).map((e) => e.category);
+    return [...new Set([...(form.side === "haber" ? CATEGORIAS_HABER : CATEGORIAS_DEBE), ...used])];
+  }, [entries, form.side]);
+
+  const saveEntry = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (savingEntry) return;
+    const category = form.category === "__otra" ? form.customCategory.trim() : form.category;
+    setSavingEntry(true);
+    setFormError("");
+    try {
+      const res = await fetch("/api/admin/caja", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: form.date, side: form.side, category, description: form.description, amount: Number(String(form.amount).replace(",", ".")) }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setFormError(out.error || "No se pudo guardar el registro.");
+        return;
+      }
+      setShowForm(false);
+      setForm(emptyForm());
+      await loadEntries();
+    } catch {
+      setFormError("No se pudo conectar con el servidor.");
+    } finally {
+      setSavingEntry(false);
+    }
+  };
+
+  const deleteEntry = async (id: string, label: string) => {
+    if (!window.confirm(`¿Borrar el registro "${label}"?`)) return;
+    const res = await fetch("/api/admin/caja", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    }).catch(() => null);
+    if (!res?.ok) alert("No se pudo borrar el registro.");
+    loadEntries();
+  };
 
   const applyPreset = (p: Preset) => {
     const now = new Date();
@@ -123,8 +209,21 @@ export default function CashSummaryTab({ purchases, sales, resellers }: Props) {
         haber: p.totalCostConIva || 0,
       });
     }
+    for (const e of entries) {
+      list.push({
+        key: `m-${e.id}`,
+        date: e.date,
+        cuenta: e.category,
+        comprobante: "Registro manual",
+        detalle: e.description,
+        medio: "",
+        debe: e.side === "debe" ? e.amount : 0,
+        haber: e.side === "haber" ? e.amount : 0,
+        manualId: e.id,
+      });
+    }
     return list.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }, [sales, purchases, resellers]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sales, purchases, resellers, entries]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Período: saldo anterior (lo previo al "desde") y movimientos dentro del rango
   const start = from ? new Date(`${from}T00:00:00`) : null;
@@ -149,7 +248,8 @@ export default function CashSummaryTab({ purchases, sales, resellers }: Props) {
   );
 
   // Balance de sumas y saldos por cuenta (período elegido)
-  const balance = CUENTAS.map((cuenta) => {
+  const cuentasManuales = [...new Set(delPeriodo.filter((m) => m.manualId).map((m) => m.cuenta))].filter((c) => !CUENTAS.includes(c)).sort();
+  const balance = [...CUENTAS, ...cuentasManuales].map((cuenta) => {
     const ms = delPeriodo.filter((m) => m.cuenta === cuenta);
     const debe = round2(ms.reduce((t, m) => t + m.debe, 0));
     const haber = round2(ms.reduce((t, m) => t + m.haber, 0));
@@ -360,9 +460,120 @@ ${visibles.map((m) => `<tr><td>${esc(fmtDate(m.date))}</td><td>${esc(m.cuenta)}<
 
       {/* Balance de sumas y saldos */}
       <div className="space-y-2">
-        <h3 className="text-base font-bold text-white">
-          Balance de sumas y saldos <span className="text-xs font-normal text-zinc-400">· {periodLabel}</span>
-        </h3>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-base font-bold text-white">
+            Balance de sumas y saldos <span className="text-xs font-normal text-zinc-400">· {periodLabel}</span>
+          </h3>
+          <button
+            type="button"
+            onClick={() => {
+              setForm(emptyForm());
+              setFormError("");
+              setShowForm((v) => !v);
+            }}
+            className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+          >
+            {showForm ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />} {showForm ? "Cancelar" : "Agregar registro"}
+          </button>
+        </div>
+        {showForm && (
+          <form onSubmit={saveEntry} className="p-3 sm:p-4 rounded-2xl bg-zinc-900/90 border border-red-900/50 grid gap-3 sm:grid-cols-2 lg:grid-cols-6 text-xs items-end">
+            <div className="lg:col-span-1">
+              <span className="block text-[10px] text-zinc-400 mb-1">Tipo</span>
+              <div className="grid grid-cols-2 gap-1">
+                {(
+                  [
+                    ["debe", "Debe", "entra"],
+                    ["haber", "Haber", "sale"],
+                  ] as const
+                ).map(([value, label, hint]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setForm({ ...form, side: value, category: "", customCategory: "" })}
+                    className={`px-2 py-1.5 rounded-lg border font-bold cursor-pointer ${
+                      form.side === value
+                        ? value === "debe"
+                          ? "bg-emerald-900/60 border-emerald-600 text-emerald-200"
+                          : "bg-rose-900/60 border-rose-600 text-rose-200"
+                        : "bg-zinc-950 border-zinc-800 text-zinc-400"
+                    }`}
+                  >
+                    {label} <span className="font-normal opacity-80">({hint})</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <label className="text-zinc-400">
+              <span className="block text-[10px] mb-1">Fecha</span>
+              <input
+                type="date"
+                value={form.date}
+                max={toInputDate(new Date())}
+                onChange={(e) => setForm({ ...form, date: e.target.value })}
+                className="w-full px-2 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-white [color-scheme:dark]"
+              />
+            </label>
+            <label className="text-zinc-400">
+              <span className="block text-[10px] mb-1">Categoría</span>
+              <select
+                value={form.category}
+                onChange={(e) => setForm({ ...form, category: e.target.value })}
+                className="w-full px-2 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-white"
+              >
+                <option value="">Elegí una categoría…</option>
+                {categoryOptions.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+                <option value="__otra">Otra (escribir)…</option>
+              </select>
+              {form.category === "__otra" && (
+                <input
+                  type="text"
+                  value={form.customCategory}
+                  onChange={(e) => setForm({ ...form, customCategory: e.target.value })}
+                  placeholder="Nombre de la categoría"
+                  maxLength={60}
+                  className="mt-1 w-full px-2 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-white"
+                />
+              )}
+            </label>
+            <label className="text-zinc-400 lg:col-span-2">
+              <span className="block text-[10px] mb-1">Descripción</span>
+              <input
+                type="text"
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                placeholder={form.side === "haber" ? "Ej: 20 perchas de madera / Posnet Getnet" : "Ej: Aporte para mercadería"}
+                maxLength={300}
+                className="w-full px-2 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-white"
+              />
+            </label>
+            <label className="text-zinc-400">
+              <span className="block text-[10px] mb-1">Monto ($)</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={form.amount}
+                onChange={(e) => setForm({ ...form, amount: e.target.value.replace(/[^0-9.,]/g, "") })}
+                placeholder="0"
+                className="w-full px-2 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-white font-mono"
+              />
+            </label>
+            <div className="sm:col-span-2 lg:col-span-6 flex flex-wrap items-center justify-end gap-2">
+              {formError && <p className="mr-auto p-2 rounded-lg bg-red-950/60 border border-red-800 text-red-200">{formError}</p>}
+              <button
+                type="submit"
+                disabled={savingEntry}
+                className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 disabled:opacity-60 text-white font-bold flex items-center gap-1.5 cursor-pointer"
+              >
+                {savingEntry && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Guardar registro
+              </button>
+            </div>
+          </form>
+        )}
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 overflow-hidden shadow-2xl">
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
@@ -432,6 +643,7 @@ ${visibles.map((m) => `<tr><td>${esc(fmtDate(m.date))}</td><td>${esc(m.cuenta)}<
                   <th className={`${th} text-emerald-400`}>Debe</th>
                   <th className={`${th} text-rose-300`}>Haber</th>
                   <th className={th}>Saldo</th>
+                  <th className="p-2.5" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/60">
@@ -442,11 +654,12 @@ ${visibles.map((m) => `<tr><td>${esc(fmtDate(m.date))}</td><td>${esc(m.cuenta)}<
                       Saldo anterior
                     </td>
                     <td className={`${td} text-zinc-300`}>{money(saldoAnterior)}</td>
+                    <td />
                   </tr>
                 )}
                 {visibles.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-10 text-center text-zinc-500">
+                    <td colSpan={9} className="py-10 text-center text-zinc-500">
                       No hay movimientos para mostrar.
                     </td>
                   </tr>
@@ -456,7 +669,13 @@ ${visibles.map((m) => `<tr><td>${esc(fmtDate(m.date))}</td><td>${esc(m.cuenta)}<
                       <td className={`${td} text-zinc-300`}>{fmtDate(m.date)}</td>
                       <td
                         className={`p-2 whitespace-nowrap font-semibold ${
-                          m.cuenta === "Ventas" ? "text-emerald-300" : m.cuenta === "Compras a proveedores" ? "text-rose-300" : "text-amber-300"
+                          m.manualId
+                            ? "text-violet-300"
+                            : m.cuenta === "Ventas"
+                            ? "text-emerald-300"
+                            : m.cuenta === "Compras a proveedores"
+                            ? "text-rose-300"
+                            : "text-amber-300"
                         }`}
                       >
                         {m.cuenta}
@@ -470,6 +689,18 @@ ${visibles.map((m) => `<tr><td>${esc(fmtDate(m.date))}</td><td>${esc(m.cuenta)}<
                       <td className={`${td} text-emerald-300`}>{m.debe ? money(m.debe) : ""}</td>
                       <td className={`${td} text-rose-300`}>{m.haber ? money(m.haber) : ""}</td>
                       <td className={`${td} font-bold ${m.saldo < 0 ? "text-rose-300" : "text-white"}`}>{money(m.saldo)}</td>
+                      <td className="p-2 text-center">
+                        {m.manualId && (
+                          <button
+                            type="button"
+                            onClick={() => deleteEntry(m.manualId as string, m.detalle)}
+                            className="p-1 rounded text-zinc-500 hover:text-red-400 cursor-pointer"
+                            title="Borrar registro manual"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))
                 )}
