@@ -74,6 +74,9 @@ model PecadoSale {
   commissionPending Boolean @default(false)
   // Venta de revendedora rendida (pagada) a la tienda; null = sin rendir
   settledAt     DateTime?
+  // Comisión que paga la tienda (ventas que cobró la tienda, ej: compra online con su código):
+  // fecha en que el admin se la pagó a la revendedora; null = adeudada
+  commissionPaidAt DateTime?
   // Venta anulada (status = "cancelled"): se devolvió el stock y no cuenta en ningún total
   cancelledAt   DateTime?
   // Compra online pagada con Mercado Pago (status "pending" hasta que se acredita)

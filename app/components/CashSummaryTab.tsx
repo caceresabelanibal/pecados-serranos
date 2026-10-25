@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import * as XLSX from "xlsx";
-import { DollarSign, FileSpreadsheet, PiggyBank, Printer, Receipt, Search, TrendingUp, Users } from "lucide-react";
+import { DollarSign, FileSpreadsheet, PiggyBank, Printer, Receipt, Search, TrendingUp } from "lucide-react";
 import { PAYMENT_METHOD_LABELS, type PurchaseRecord, type Reseller, type Sale } from "@/app/products";
 import { formatMoney } from "@/lib/pricing";
 import { buildSearchText, matchesSearch } from "@/lib/search";
@@ -46,7 +46,7 @@ interface Movimiento {
   notas?: string;
 }
 
-// Pestaña "Flujo de caja": inversión, venta proyectada, facturación, balance de sumas y saldos y comisiones
+// Pestaña "Flujo de caja": inversión, venta proyectada, facturación y balance de sumas y saldos
 export default function CashSummaryTab({ purchases, sales, resellers }: Props) {
   // Período: por defecto los últimos 30 días
   const [from, setFrom] = useState(() => toInputDate(daysAgo(30)));
@@ -159,25 +159,9 @@ export default function CashSummaryTab({ purchases, sales, resellers }: Props) {
   const sumaHaber = round2(balance.reduce((t, b) => t + b.haber, 0));
   const saldoFinal = round2(saldoAnterior + sumaDebe - sumaHaber);
 
-  // Comisiones por revendedora en el período
-  const commissions = useMemo(() => {
-    const byReseller = new Map<string, { id: string; name: string; total: number; sales: number; units: number; pending: number }>();
-    for (const s of sales) {
-      if (!s.resellerId || !inRange(s.date)) continue;
-      const row = byReseller.get(s.resellerId) || { id: s.resellerId, name: resellerName(s), total: 0, sales: 0, units: 0, pending: 0 };
-      row.total += s.commissionTotal || 0;
-      row.sales += 1;
-      row.units += s.items.reduce((u, i) => u + i.quantity, 0);
-      if (s.commissionPending) row.pending += 1;
-      byReseller.set(s.resellerId, row);
-    }
-    const rows = [...byReseller.values()].sort((a, b) => b.total - a.total);
-    return { rows, total: rows.reduce((t, r) => t + r.total, 0) };
-  }, [sales, resellers, from, to]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const fileStamp = () => toInputDate(new Date());
 
-  // Descarga en Excel: balance, movimientos y comisiones del período
+  // Descarga en Excel: balance y movimientos del período
   const exportExcel = () => {
     const wb = XLSX.utils.book_new();
     const bal = [
@@ -206,14 +190,6 @@ export default function CashSummaryTab({ purchases, sales, resellers }: Props) {
     const ws2 = XLSX.utils.json_to_sheet(mov);
     ws2["!cols"] = [{ wch: 12 }, { wch: 26 }, { wch: 22 }, { wch: 60 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
     XLSX.utils.book_append_sheet(wb, ws2, "Movimientos");
-
-    const com = [
-      ...commissions.rows.map((r) => ({ Revendedora: r.name, Ventas: r.sales, Unidades: r.units, "Total comisiones": round2(r.total) })),
-      { Revendedora: "Total", Ventas: "", Unidades: "", "Total comisiones": round2(commissions.total) },
-    ];
-    const ws3 = XLSX.utils.json_to_sheet(com);
-    ws3["!cols"] = [{ wch: 30 }, { wch: 10 }, { wch: 10 }, { wch: 18 }];
-    XLSX.utils.book_append_sheet(wb, ws3, "Comisiones");
 
     XLSX.writeFile(wb, `Flujo_de_caja_Pecados_Serranos_${fileStamp()}.xlsx`);
   };
@@ -252,10 +228,6 @@ ${start ? `<tr><td colspan="4">Saldo anterior</td><td class="n">${esc(money(sald
 ${start ? `<tr class="tot"><td colspan="7">Saldo anterior</td><td class="n">${esc(money(saldoAnterior))}</td></tr>` : ""}
 ${visibles.map((m) => `<tr><td>${esc(fmtDate(m.date))}</td><td>${esc(m.cuenta)}</td><td>${esc(m.comprobante)}</td><td>${esc(m.detalle)}</td><td>${esc(m.medio)}</td><td class="n">${cell(m.debe)}</td><td class="n">${cell(m.haber)}</td><td class="n">${esc(money(m.saldo))}</td></tr>`).join("") || `<tr><td colspan="8">Sin movimientos en el período.</td></tr>`}
 </tbody></table>
-<h2>Comisiones de revendedoras</h2>
-<table><thead><tr><th>Revendedora</th><th class="n">Ventas</th><th class="n">Unidades</th><th class="n">Total comisiones</th></tr></thead><tbody>
-${commissions.rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="n">${r.sales}</td><td class="n">${r.units}</td><td class="n">${esc(money(r.total))}</td></tr>`).join("") || `<tr><td colspan="4">Sin comisiones en el período.</td></tr>`}
-</tbody><tfoot><tr><td colspan="3">Total</td><td class="n">${esc(money(commissions.total))}</td></tr></tfoot></table>
 </body></html>`;
     const w = window.open("", "_blank");
     if (!w) {
@@ -290,7 +262,7 @@ ${commissions.rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="n">${r.sale
             <PiggyBank className="w-6 h-6 text-red-500" /> Flujo de caja
           </h2>
           <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-            Lo invertido en mercadería, lo que se proyecta vender, lo facturado, el balance de caja y las comisiones de las revendedoras.
+            Lo invertido en mercadería, lo que se proyecta vender, lo facturado, y el balance de caja.
           </p>
         </div>
         <div className="flex gap-2">
@@ -323,7 +295,7 @@ ${commissions.rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="n">${r.sale
         {card("Facturación total", facturacionTotal, `Monto total vendido (${sales.length} ventas, histórico)`, Receipt, "border-sky-900/50")}
       </div>
 
-      {/* Período y búsqueda: se aplican al balance, a los movimientos y a las comisiones */}
+      {/* Período y búsqueda: se aplican al balance y a los movimientos */}
       <div className="p-3 rounded-2xl bg-zinc-900/80 border border-zinc-800 flex flex-col lg:flex-row lg:items-end gap-3 text-xs">
         <div className="relative flex-1 min-w-0">
           <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -507,56 +479,6 @@ ${commissions.rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="n">${r.sale
         </div>
       </div>
 
-      {/* Comisiones de revendedoras */}
-      <div className="p-4 sm:p-5 rounded-2xl bg-zinc-900/80 border border-zinc-800 space-y-4">
-        <div>
-          <h3 className="text-base font-bold text-white flex items-center gap-2">
-            <Users className="w-4 h-4 text-amber-400" /> Comisiones de revendedoras <span className="text-xs font-normal text-zinc-400">· {periodLabel}</span>
-          </h3>
-          <p className="text-xs text-zinc-400 mt-0.5">Suma de comisiones de las ventas concretadas en el período (por fecha de venta).</p>
-        </div>
-
-        {commissions.rows.length === 0 ? (
-          <p className="py-8 text-center text-sm text-zinc-500">No hay comisiones de revendedoras en este período.</p>
-        ) : (
-          <div className="rounded-xl border border-zinc-800 overflow-hidden">
-            <table className="w-full text-xs">
-              <thead className="bg-zinc-950/80 text-zinc-400 uppercase tracking-wider text-[10px]">
-                <tr>
-                  <th className="p-2.5 text-left">Revendedora</th>
-                  <th className="p-2.5 text-center hidden sm:table-cell">Ventas</th>
-                  <th className="p-2.5 text-center hidden sm:table-cell">Unidades</th>
-                  <th className="p-2.5 text-right">Total comisiones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-800/70">
-                {commissions.rows.map((r) => (
-                  <tr key={r.id} className="hover:bg-zinc-800/30">
-                    <td className="p-2 font-bold text-white">
-                      {r.name}
-                      {r.pending > 0 && (
-                        <span className="block text-[10px] font-semibold text-amber-300">
-                          {r.pending} {r.pending === 1 ? "venta" : "ventas"} con comisión a definir
-                        </span>
-                      )}
-                    </td>
-                    <td className="p-2 text-center text-zinc-300 hidden sm:table-cell">{r.sales}</td>
-                    <td className="p-2 text-center text-zinc-300 hidden sm:table-cell">{r.units}</td>
-                    <td className="p-2 text-right font-mono font-black text-amber-300">{formatMoney(r.total)}</td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot className="bg-zinc-950/80">
-                <tr>
-                  <td className="p-2.5 font-black text-white uppercase">Total</td>
-                  <td className="p-2.5 hidden sm:table-cell" colSpan={2} />
-                  <td className="p-2.5 text-right font-mono font-black text-base text-amber-300">{formatMoney(commissions.total)}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        )}
-      </div>
     </div>
   );
 }

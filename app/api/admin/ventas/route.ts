@@ -14,15 +14,41 @@ async function readAdminBody(request: Request): Promise<any | NextResponse> {
   }
 }
 
-// PUT /api/admin/ventas  { ids: string[], settled: boolean }
-// Sólo admin: marca ventas de revendedora como rendidas (pagadas a la tienda) o las vuelve a "sin rendir".
+// PUT /api/admin/ventas
+//  { ids, settled: boolean }: ventas de revendedora rendidas (pagadas a la tienda) o de nuevo sin rendir.
+//  { ids, commissionPaid: boolean, paidAt?: "AAAA-MM-DD" }: comisión pagada a la revendedora en ventas
+//    que cobró la tienda (ej: compra online con su código), con la fecha de pago; false = adeudada.
+// Sólo admin.
 export async function PUT(request: Request) {
   const body = await readAdminBody(request);
   if (body instanceof NextResponse) return body;
   const ids: string[] = Array.isArray(body.ids) ? body.ids.filter((x: unknown) => typeof x === "string").slice(0, 500) : [];
-  if (ids.length === 0 || typeof body.settled !== "boolean") {
-    return NextResponse.json({ error: "Solicitud inválida." }, { status: 400 });
+  if (ids.length === 0) return NextResponse.json({ error: "Solicitud inválida." }, { status: 400 });
+
+  if (typeof body.commissionPaid === "boolean") {
+    let paidAt: Date | null = null;
+    if (body.commissionPaid) {
+      const m = typeof body.paidAt === "string" ? body.paidAt.match(/^(\d{4})-(\d{2})-(\d{2})$/) : null;
+      // Fecha elegida por el admin (mediodía local para que no cambie de día por la zona horaria)
+      paidAt = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12) : new Date();
+      if (Number.isNaN(paidAt.getTime()) || paidAt.getTime() > Date.now() + 86400000) {
+        return NextResponse.json({ error: "Fecha de pago inválida." }, { status: 400 });
+      }
+    }
+    const res = await prisma.pecadoSale.updateMany({
+      where: {
+        id: { in: ids },
+        resellerId: { not: null },
+        channel: { not: "reseller" },
+        status: "completed",
+        commissionTotal: { gt: 0 },
+      },
+      data: { commissionPaidAt: paidAt },
+    });
+    return NextResponse.json({ success: true, updated: res.count });
   }
+
+  if (typeof body.settled !== "boolean") return NextResponse.json({ error: "Solicitud inválida." }, { status: 400 });
   const res = await prisma.pecadoSale.updateMany({
     where: { id: { in: ids }, channel: "reseller", status: { not: "cancelled" } },
     data: { settledAt: body.settled ? new Date() : null },

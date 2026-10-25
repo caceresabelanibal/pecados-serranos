@@ -3,8 +3,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { BarChart3, Ban, Edit3, Loader2, LogOut, Package, Plus, Receipt, Trash2, UserCheck, X } from "lucide-react";
-import { PAYMENT_METHOD_LABELS, PAYMENT_METHOD_OPTIONS, isCashPriceMethod, owedToStore, type PaymentMethod } from "@/app/products";
+import { PAYMENT_METHOD_LABELS, PAYMENT_METHOD_OPTIONS, commissionStatus, isCashPriceMethod, owedToStore, type PaymentMethod, type Sale } from "@/app/products";
 import { formatMoney } from "@/lib/pricing";
+import { commissionTotals } from "@/app/components/ResellerSections";
 
 interface AsociadoProduct {
   id: string;
@@ -42,6 +43,7 @@ interface AsociadoSale {
   commissionPending?: boolean;
   settledAt?: string | null; // rendida (pagada) a la tienda
   orderCode?: string | null; // código de pedido
+  commissionPaidAt?: string | null; // comisión que le pagó la tienda (ventas que cobró la tienda)
   editable?: boolean; // la cargó ella y no está rendida: puede editarla o anularla
   items: { key: string; productTitle: string; quantity: number; unitPrice: number; subtotal: number; commission?: number }[];
 }
@@ -518,6 +520,44 @@ export default function AsociadoPanel({ onLogout }: Props) {
                 Hay ventas con comisión a definir: el pago a la tienda va a bajar cuando la tienda la cargue.
               </p>
             )}
+            {(() => {
+              const t = commissionTotals(allSales.map((x) => ({ ...x, resellerId: data?.reseller.id }) as unknown as Sale));
+              if (t.total <= 0 && t.undefinedCount === 0) return null;
+              const fmtDay = (iso: string) => new Date(iso).toLocaleDateString("es-AR");
+              return (
+                <div className="p-3 sm:p-4 rounded-2xl bg-amber-950/20 border border-amber-900/50 text-xs space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-bold text-amber-200">Mis comisiones</span>
+                    {t.owed > 0 ? (
+                      <span className="px-2 py-0.5 rounded-full bg-rose-950 border border-rose-800 text-rose-200 font-bold">
+                        La tienda te debe {formatMoney(t.owed)}
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-800 text-emerald-300 font-bold">
+                        ✓ No se te adeudan comisiones
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="p-2 rounded-lg bg-zinc-950/70 border border-zinc-800">
+                      <span className="block text-[10px] uppercase text-zinc-500 font-semibold">A cobrar de la tienda</span>
+                      <span className="block text-sm font-black font-mono text-rose-300">{formatMoney(t.owed)}</span>
+                      <span className="text-[10px] text-zinc-500">Compras online con tu código</span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-zinc-950/70 border border-zinc-800">
+                      <span className="block text-[10px] uppercase text-zinc-500 font-semibold">Ya cobradas</span>
+                      <span className="block text-sm font-black font-mono text-emerald-300">{formatMoney(t.paid)}</span>
+                      <span className="text-[10px] text-zinc-500">{t.lastPaidAt ? `Último pago: ${fmtDay(t.lastPaidAt)}` : "Sin pagos todavía"}</span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-zinc-950/70 border border-zinc-800">
+                      <span className="block text-[10px] uppercase text-zinc-500 font-semibold">Las descontás al rendir</span>
+                      <span className="block text-sm font-black font-mono text-sky-300">{formatMoney(t.retained + t.retainedSettled)}</span>
+                      <span className="text-[10px] text-zinc-500">Ventas que cobraste vos{t.retained > 0 ? ` · ${formatMoney(t.retained)} sin rendir` : ""}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
             {sales.length === 0 ? (
               <div className="p-8 rounded-2xl bg-zinc-900/60 border border-zinc-800 text-center text-sm text-zinc-400">
                 {allSales.length === 0 ? (
@@ -564,7 +604,15 @@ export default function AsociadoPanel({ onLogout }: Props) {
                           {s.commissionPending ? " (parte a definir)" : ""}
                         </span>
                         {s.channel === "web_whatsapp" ? (
-                          <span className="block text-[11px] text-zinc-400">Cobró la tienda: te corresponde tu comisión</span>
+                          s.commissionPaidAt ? (
+                            <span className="block text-[11px] font-semibold text-emerald-400">
+                              ✓ Comisión cobrada el {new Date(s.commissionPaidAt).toLocaleDateString("es-AR")}
+                            </span>
+                          ) : commissionStatus({ ...s, resellerId: data?.reseller.id }) === "owed" ? (
+                            <span className="block text-[11px] font-semibold text-rose-300">Cobró la tienda: te adeuda la comisión</span>
+                          ) : (
+                            <span className="block text-[11px] text-zinc-400">Cobró la tienda</span>
+                          )
                         ) : s.settledAt ? (
                           <span className="block text-[11px] font-semibold text-emerald-400">
                             ✓ Rendida a la tienda ({formatMoney(owedToStore(s))})

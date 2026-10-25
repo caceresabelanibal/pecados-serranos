@@ -390,6 +390,7 @@ async function getFullState() {
         commissionPending: s.commissionPending,
         settledAt: s.settledAt ? s.settledAt.toISOString() : null,
         orderCode: s.orderCode,
+        commissionPaidAt: s.commissionPaidAt ? s.commissionPaidAt.toISOString() : null,
         items: s.items.map((i) => ({
           productId: i.productId || "",
           productSku: i.productSku,

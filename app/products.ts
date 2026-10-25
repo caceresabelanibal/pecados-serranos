@@ -72,11 +72,33 @@ export interface Sale {
   commissionPending?: boolean; // Algún artículo sin comisión definida
   settledAt?: string | null; // Rendida (pagada) a la tienda por la revendedora
   orderCode?: string | null; // Código de pedido (2 letras + 4 números)
+  commissionPaidAt?: string | null; // Comisión pagada a la revendedora (ventas que cobró la tienda)
 }
 
 // Lo que la revendedora le tiene que pagar a la tienda por una venta que cobró ella
 // (venta registrada como revendedora: total menos su comisión). Las compras online con
 // su código las cobra la tienda, así que no generan deuda.
+// Estado de la comisión de la revendedora en una venta:
+//  - "retained": la cobró ella y descuenta su comisión al pagarle a la tienda (todavía sin rendir)
+//  - "retained_settled": ídem, ya rendida (comisión saldada)
+//  - "owed": la cobró la tienda (ej: compra online con su código): la tienda se la adeuda
+//  - "paid": ídem, el admin ya se la pagó (commissionPaidAt)
+//  - "undefined": todavía no tiene comisión definida; "none": no hay comisión
+export type CommissionStatus = "none" | "undefined" | "retained" | "retained_settled" | "owed" | "paid";
+export function commissionStatus(s: {
+  resellerId?: string | null;
+  channel: string;
+  commissionTotal?: number;
+  commissionPending?: boolean;
+  settledAt?: string | null;
+  commissionPaidAt?: string | null;
+}): CommissionStatus {
+  if (!s.resellerId) return "none";
+  if (!(s.commissionTotal && s.commissionTotal > 0)) return s.commissionPending ? "undefined" : "none";
+  if (s.channel === "reseller") return s.settledAt ? "retained_settled" : "retained";
+  return s.commissionPaidAt ? "paid" : "owed";
+}
+
 export function owedToStore(s: { channel: string; status?: string; totalAmount: number; commissionTotal?: number }): number {
   if (s.channel !== "reseller" || s.status === "cancelled") return 0;
   return Math.max(0, Math.round((s.totalAmount - (s.commissionTotal || 0)) * 100) / 100);

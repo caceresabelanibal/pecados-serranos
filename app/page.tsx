@@ -63,6 +63,7 @@ import AgeGate from "@/app/components/AgeGate";
 import MercadoPagoSettings from "@/app/components/MercadoPagoSettings";
 import BackupSettings from "@/app/components/BackupSettings";
 import CashSummaryTab from "@/app/components/CashSummaryTab";
+import { CommissionSummary, ResellerCommissionBox, ResellerSalesList } from "@/app/components/ResellerSections";
 import {
   flujoDeCaja,
   formatMoney,
@@ -2255,6 +2256,23 @@ export default function PecadosPage() {
     }
   };
 
+  // Comisiones que paga la tienda (ventas que cobró la tienda): pagadas con fecha o de nuevo adeudadas
+  const handleSetCommissionPaid = async (ids: string[], paid: boolean, paidAt?: string) => {
+    if (ids.length === 0) return;
+    try {
+      const res = await fetch("/api/admin/ventas", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, commissionPaid: paid, paidAt }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) alert(out.error || "No se pudo registrar el pago de la comisión.");
+    } catch {
+      alert("No se pudo conectar con el servidor.");
+    }
+    fetchServerData();
+  };
+
   // Ventas de revendedora rendidas (pagadas a la tienda) o de nuevo sin rendir
   const handleSetSalesSettled = async (ids: string[], settled: boolean) => {
     if (ids.length === 0) return;
@@ -3587,6 +3605,8 @@ export default function PecadosPage() {
               </div>
             </div>
 
+            <CommissionSummary sales={sales} resellers={resellers} />
+
             {/* Una solapa por revendedora (si hay más de una) */}
             {resellers.length > 1 && (
               <div className="flex gap-1.5 overflow-x-auto border-b border-zinc-800 pb-px" role="tablist" aria-label="Revendedoras">
@@ -3630,36 +3650,6 @@ export default function PecadosPage() {
                 const resellerSales = sales.filter((s) => s.resellerId === r.id);
                 const totalUnitsSold = resellerSales.reduce((sum, s) => sum + s.items.reduce((u, i) => u + i.quantity, 0), 0);
                 const totalRevenueSold = resellerSales.reduce((sum, s) => sum + s.totalAmount, 0);
-                const soldByProduct = new Map<
-                  string,
-                  { productId: string; title: string; sku: string; units: number; total: number; commission: number; pending: number; byCode: number; inHand: number }
-                >();
-                for (const s of resellerSales) {
-                  const byCode = s.channel === "web_whatsapp";
-                  const inHand = !byCode && /consignaci|Rendición de lote/.test(s.notes || "");
-                  for (const i of s.items) {
-                    const key = i.productId || i.productSku;
-                    const row = soldByProduct.get(key) || {
-                      productId: i.productId,
-                      title: i.productTitle,
-                      sku: i.productSku,
-                      units: 0,
-                      total: 0,
-                      commission: 0,
-                      pending: 0,
-                      byCode: 0,
-                      inHand: 0,
-                    };
-                    row.units += i.quantity;
-                    row.total += i.subtotal;
-                    row.commission += i.commission || 0;
-                    if (i.commissionUnit === null || i.commissionUnit === undefined) row.pending += i.quantity;
-                    if (byCode) row.byCode += i.quantity;
-                    else if (inHand) row.inHand += i.quantity;
-                    soldByProduct.set(key, row);
-                  }
-                }
-                const soldRows = [...soldByProduct.values()].sort((a, b) => b.units - a.units);
                 const unsettledSales = resellerSales.filter((s) => !s.settledAt && owedToStore(s) > 0);
                 const owedNow = unsettledSales.reduce((sum, s) => sum + owedToStore(s), 0);
                 const totalCommissionEarned = resellerSales.reduce((sum, s) => sum + (s.commissionTotal || 0), 0);
@@ -3767,41 +3757,20 @@ export default function PecadosPage() {
                         )}
                       </div>
 
-                      {/* Artículos vendidos (en mano, del depósito o con su código) */}
+                      {/* Comisiones: adeudadas, pagadas y descontadas al rendir */}
+                      <ResellerCommissionBox reseller={r} sales={resellerSales} onPay={handleSetCommissionPaid} />
+
+                      {/* Ventas agrupadas por compra (como en la pestaña Ventas) */}
                       <div className="mt-3">
-                        <span className="text-[10px] text-zinc-500 uppercase font-semibold block mb-1.5">Artículos vendidos</span>
-                        {soldRows.length === 0 ? (
-                          <p className="text-[11px] text-zinc-500">Todavía no vendió artículos.</p>
-                        ) : (
-                          <div className="grid gap-1.5 lg:grid-cols-2 max-h-[28rem] overflow-y-auto pr-1">
-                            {soldRows.map((row) => (
-                              <div key={row.productId || row.sku} className="p-2 rounded-lg bg-zinc-950/70 border border-zinc-800/60 text-[11px]">
-                                <div className="flex items-start justify-between gap-2">
-                                  <span className="text-zinc-200 font-semibold leading-snug">
-                                    <strong className="text-white">{row.units}x</strong> {row.title}
-                                  </span>
-                                  <span className="font-mono text-emerald-400 whitespace-nowrap">{formatMoney(row.total)}</span>
-                                </div>
-                                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-zinc-400">
-                                  {row.inHand > 0 && <span>📦 {row.inHand} en mano</span>}
-                                  {row.byCode > 0 && <span className="text-amber-300">🏷️ {row.byCode} con su código</span>}
-                                  {row.units - row.inHand - row.byCode > 0 && <span>🏬 {row.units - row.inHand - row.byCode} del depósito</span>}
-                                  <span className="text-amber-200">Comisión: {formatMoney(row.commission)}</span>
-                                  {row.pending > 0 && row.productId && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDefineSoldCommission(r.id, r.name, row.productId, row.title)}
-                                      className="px-1.5 py-0.5 rounded border border-amber-700 bg-amber-950 text-amber-300 font-bold cursor-pointer"
-                                      title="Definir la comisión por unidad de este artículo"
-                                    >
-                                      Definir comisión ({row.pending} un.)
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        <span className="text-[10px] text-zinc-500 uppercase font-semibold block mb-1.5">
+                          Ventas ({resellerSales.length})
+                        </span>
+                        <ResellerSalesList
+                          reseller={r}
+                          sales={resellerSales}
+                          onDefineCommission={handleDefineSoldCommission}
+                          onCommissionPaid={handleSetCommissionPaid}
+                        />
                       </div>
                     </div>
 
