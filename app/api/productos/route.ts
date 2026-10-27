@@ -616,6 +616,32 @@ export async function POST(request: Request) {
           for (const p of products) {
             const cleanSku = p.sku ? p.sku.trim().toUpperCase() : `PEC-${Date.now().toString().slice(-4)}`;
             const pricing = normalizePricing(p);
+
+            // Producto que ya existe (mismo id): se actualiza esa fila aunque se le haya cambiado el
+            // código. Antes se buscaba sólo por código y un cambio de código creaba un duplicado.
+            const existing =
+              typeof p.id === "string" && p.id
+                ? await prisma.pecadoProduct.findUnique({ where: { id: p.id }, select: { id: true, sku: true } })
+                : null;
+            if (existing && existing.sku !== cleanSku) {
+              const taken = await prisma.pecadoProduct.findUnique({ where: { sku: cleanSku }, select: { id: true, active: true } });
+              if (taken && taken.active) {
+                // El código nuevo lo usa otro producto activo: no se cambia (el panel ya lo avisa)
+                console.warn(`[Productos] No se cambió el código ${existing.sku} → ${cleanSku}: lo usa otro producto activo`);
+                continue;
+              }
+              if (taken) {
+                // Lo usaba un producto dado de baja: se le cambia el código para liberarlo
+                await prisma.pecadoProduct.update({
+                  where: { id: taken.id },
+                  data: { sku: `${cleanSku}-BAJA-${Date.now().toString(36)}`.slice(0, 60) },
+                });
+                await prisma.pecadoProductImage.deleteMany({ where: { sku: cleanSku } });
+              }
+              await prisma.pecadoProduct.update({ where: { id: existing.id }, data: { sku: cleanSku } });
+              // La foto guardada en la base pasa al código nuevo
+              await prisma.pecadoProductImage.updateMany({ where: { sku: existing.sku }, data: { sku: cleanSku } });
+            }
             // Stock: si el panel informa el stock con el que cargó (stockBase), se aplica sólo la
             // diferencia sobre el valor actual. Así no se pisan ventas hechas mientras tanto
             // (tienda online, asociados) con datos viejos del panel.

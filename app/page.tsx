@@ -1656,6 +1656,12 @@ export default function PecadosPage() {
     }
 
     const cleanSku = prodForm.sku.trim().toUpperCase() || `PEC-${Date.now().toString().slice(-4)}`;
+    // El código es único: no puede repetir el de otro producto
+    const skuOwner = products.find((p) => (p.sku || "").toUpperCase() === cleanSku && p.id !== editingProduct?.id);
+    if (skuOwner) {
+      alert(`El código ${cleanSku} ya lo usa "${skuOwner.title}". Elegí otro código.`);
+      return;
+    }
     // Fórmulas del flujo de caja (mismas que la planilla y que el servidor)
     const costSinIva = Math.max(0, Number(prodForm.costoSinIva) || 0);
     const costConIva = proveedorConIva(costSinIva);
