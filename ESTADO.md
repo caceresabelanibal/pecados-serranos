@@ -41,33 +41,31 @@
   - Registrar venta.
 - **Mercado Pago:** Checkout Pro configurado con la cuenta del dueño. Los avisos (webhook) se configuran solos en cada pago.
 
-## Datos en producción
-
-Desde el 26/10 el dueño está cargando mercadería real. Al 2026-10-27 hay **57 productos activos y 86 unidades**. El resto de los datos sigue como quedó después de la última restauración (2026-10-25):
+## Datos en producción (al crear el punto de restauración, 2026-10-27 00:10)
 
 | Dato | Cantidad |
 |---|---|
-| Productos activos | 57 (39 al restaurar) |
-| Unidades en stock | 86 (43 al restaurar) |
+| Productos activos | 57 |
+| Unidades en stock | 86 |
 | Ventas concretadas | 0 |
 | Compras pendientes de cobro | 0 |
-| Pedidos anulados (pruebas) | 16 |
+| Pedidos anulados (pruebas viejas) | 16 |
 | Revendedoras activas | 1 |
 | Lotes entregados | 1 |
 | Compras a proveedores | 2 |
 | Interesados | 1 |
-| Fotos | 39 |
-| Registros manuales de caja | 0 |
+| Fotos | 57 |
+| Registros manuales de caja | 3 |
 
 ## Punto de restauración vigente ("restaurá")
 
-- **Archivo:** `/root/backups-manuales/pecados_OPERATIVO_20261025_0026.sql.gz`.
-- **Qué incluye:** solo lo operativo: productos, fotos, ventas, revendedoras, lotes, compras, interesados y pedido a proveedor.
+- **Archivo:** `/root/backups-manuales/pecados_OPERATIVO_20261027_0010.sql.gz` (8,8 MB), con los datos de la tabla de arriba.
+- **Qué incluye:** solo lo operativo: productos, fotos, ventas, revendedoras, lotes, compras, interesados, pedido a proveedor y registros manuales de caja.
 - **Qué no incluye:** la configuración del sitio (WhatsApp y Mercado Pago), que queda como esté.
-- **Registros manuales de caja:** la tabla es posterior al backup. Al restaurar se vacía, previa consulta al dueño.
-- ⚠️ **El punto es anterior a la carga real de productos del 26–27/10.** Restaurarlo hoy borraría esos productos. Antes de restaurar, confirmar con el dueño o crear un punto nuevo.
-- **Otros backups en la misma carpeta:**
-  - Punto anterior completo: `pecados_ANTES_PRUEBAS_20261023_1732.sql.gz`.
+- **Antes de restaurar:** si se cargaron datos reales después de este punto, se avisa al dueño y se confirma.
+- **Puntos anteriores (se conservan):**
+  - `pecados_OPERATIVO_20261025_0026.sql.gz`: 39 productos.
+  - `pecados_ANTES_PRUEBAS_20261023_1732.sql.gz`: completo.
   - Estados de pruebas: `pecados_ESTADO_PRUEBAS_*`.
 
 ## Pendientes y avisos

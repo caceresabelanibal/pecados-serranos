@@ -4,6 +4,7 @@
 > Formato: fecha · commit · qué cambió (para el dueño de la tienda, sin tecnicismos de más).
 
 ## 2026-10-27
+- **Datos de producción:** nuevo punto de restauración `pecados_OPERATIVO_20261027_0010`, con la mercadería real cargada: 57 productos, 86 unidades y 3 registros manuales de caja.
 - `4e3fb25` **Productos:** al editar un artículo y cambiarle el código ya no se duplica. Se actualiza el mismo artículo y su foto pasa al código nuevo.
   - Si el código nuevo ya lo usa otro producto activo, el panel avisa y no guarda.
   - Se puede reutilizar el código de un producto dado de baja.
