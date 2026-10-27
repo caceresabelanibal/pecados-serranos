@@ -3,6 +3,12 @@
 > Historial de cambios, el más nuevo arriba. Se agrega una entrada con cada cambio publicado.
 > Formato: fecha · commit · qué cambió (para el dueño de la tienda, sin tecnicismos de más).
 
+## 2026-10-27
+- `4e3fb25` **Productos:** al editar un artículo y cambiarle el código ya no se duplica. Se actualiza el mismo artículo y su foto pasa al código nuevo.
+  - Si el código nuevo ya lo usa otro producto activo, el panel avisa y no guarda.
+  - Se puede reutilizar el código de un producto dado de baja.
+  - En producción, los duplicados que se habían generado ya estaban dados de baja; no hubo que limpiar nada.
+
 ## 2026-10-26
 - Documentación permanente del proyecto: `CONTEXTO.md`, `ESTADO.md`, `CHANGELOG.md` y `CLAUDE.md` en la raíz del repositorio.
 

@@ -3,8 +3,8 @@
 > Foto del sistema **hoy**. Se actualiza después de cada cambio.
 > ⚠️ Repo público: sin contraseñas, tokens ni datos personales.
 
-**Última actualización:** 2026-10-26
-**Versión en producción:** commit `877acbf` (registros manuales en Flujo de caja). En producción coincide con GitHub (`master`).
+**Última actualización:** 2026-10-27
+**Versión en producción:** commit `4e3fb25` (editar un producto sin duplicarlo). En producción coincide con GitHub (`master`).
 
 ## Funciona en producción
 
@@ -41,12 +41,14 @@
   - Registrar venta.
 - **Mercado Pago:** Checkout Pro configurado con la cuenta del dueño. Los avisos (webhook) se configuran solos en cada pago.
 
-## Datos en producción (después de la última restauración, 2026-10-25)
+## Datos en producción
+
+Desde el 26/10 el dueño está cargando mercadería real. Al 2026-10-27 hay **57 productos activos y 86 unidades**. El resto de los datos sigue como quedó después de la última restauración (2026-10-25):
 
 | Dato | Cantidad |
 |---|---|
-| Productos activos | 39 |
-| Unidades en stock | 43 |
+| Productos activos | 57 (39 al restaurar) |
+| Unidades en stock | 86 (43 al restaurar) |
 | Ventas concretadas | 0 |
 | Compras pendientes de cobro | 0 |
 | Pedidos anulados (pruebas) | 16 |
@@ -63,6 +65,7 @@
 - **Qué incluye:** solo lo operativo: productos, fotos, ventas, revendedoras, lotes, compras, interesados y pedido a proveedor.
 - **Qué no incluye:** la configuración del sitio (WhatsApp y Mercado Pago), que queda como esté.
 - **Registros manuales de caja:** la tabla es posterior al backup. Al restaurar se vacía, previa consulta al dueño.
+- ⚠️ **El punto es anterior a la carga real de productos del 26–27/10.** Restaurarlo hoy borraría esos productos. Antes de restaurar, confirmar con el dueño o crear un punto nuevo.
 - **Otros backups en la misma carpeta:**
   - Punto anterior completo: `pecados_ANTES_PRUEBAS_20261023_1732.sql.gz`.
   - Estados de pruebas: `pecados_ESTADO_PRUEBAS_*`.
