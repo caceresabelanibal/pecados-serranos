@@ -161,7 +161,13 @@ export default function CashSummaryTab({ purchases, sales, resellers }: Props) {
   const periodLabel = from || to ? `${from ? fmtDate(`${from}T00:00:00`) : "inicio"} al ${to ? fmtDate(`${to}T00:00:00`) : "hoy"}` : "Todo el historial";
 
   // Mismos cálculos que "Compras y proveedores" y "Ventas" (totales históricos)
-  const inversionConIva = purchases.reduce((acc, p) => acc + (p.totalCostConIva || 0), 0);
+  // Inversión total = compras a proveedores (c/IVA) + gastos de la empresa cargados a mano en el Haber
+  // (etiquetas, bolsas, mobiliario, posnet…). Los retiros del dueño no son inversión.
+  const comprasConIva = purchases.reduce((acc, p) => acc + (p.totalCostConIva || 0), 0);
+  const otrosGastos = entries
+    .filter((e) => e.side === "haber" && !/retiro/i.test(e.category))
+    .reduce((acc, e) => acc + e.amount, 0);
+  const inversionConIva = comprasConIva + otrosGastos;
   const ventaProyectada = purchases.reduce((acc, p) => acc + (p.totalSaleEstimated || 0), 0);
   const facturacionTotal = sales.reduce((acc, s) => acc + s.totalAmount, 0);
 
@@ -311,7 +317,7 @@ export default function CashSummaryTab({ purchases, sales, resellers }: Props) {
 <h1>Flujo de caja — Pecados Serranos</h1>
 <div class="muted">Período: ${esc(periodLabel)}${query ? ` · Búsqueda: "${esc(query)}"` : ""} · Emitido el ${esc(new Date().toLocaleString("es-AR"))}</div>
 <div class="cards" style="margin-top:10px">
-  <div>Inversión total (c/IVA)<b>${esc(money(inversionConIva))}</b></div>
+  <div>Inversión total (c/IVA)<b>${esc(money(inversionConIva))}</b><span class="muted">Compras ${esc(money(comprasConIva))} + otros gastos ${esc(money(otrosGastos))}</span></div>
   <div>Venta proyectada<b>${esc(money(ventaProyectada))}</b></div>
   <div>Facturación total (histórica)<b>${esc(money(facturacionTotal))}</b></div>
 </div>
@@ -384,7 +390,13 @@ ${visibles.map((m) => `<tr><td>${esc(fmtDate(m.date))}</td><td>${esc(m.cuenta)}<
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        {card("Inversión total (c/IVA)", inversionConIva, "Total abonado a proveedores (todas las compras)", DollarSign, "border-red-900/50")}
+        {card(
+          "Inversión total (c/IVA)",
+          inversionConIva,
+          `Compras a proveedores ${formatMoney(comprasConIva)} + otros gastos ${formatMoney(otrosGastos)} (registros manuales)`,
+          DollarSign,
+          "border-red-900/50"
+        )}
         <div className="p-4 rounded-2xl bg-zinc-900/90 border border-emerald-900/50">
           <div className="text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 text-zinc-300">
             <TrendingUp className="w-3.5 h-3.5" /> Venta proyectada
