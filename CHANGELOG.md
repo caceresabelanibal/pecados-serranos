@@ -3,6 +3,18 @@
 > Historial de cambios, el más nuevo arriba. Se agrega una entrada con cada cambio publicado.
 > Formato: fecha · commit · qué cambió (para el dueño de la tienda, sin tecnicismos de más).
 
+## 2026-11-02
+- `f55eea6` **Importar Excel:** ahora reconoce la planilla de costos (Código, Tipo, Talle, Descripcion, SIN IVA, CON IVA, Ganancia, Cantidad, Publico Efectivo c/u, Observaciones), además del pedido del proveedor.
+  - Los encabezados se comparan sin mayúsculas, acentos ni espacios de más. También encuentra la fila de encabezados aunque haya títulos arriba.
+  - Los productos nuevos quedan completos: costo, multiplicador (Ganancia ÷ Costo con IVA), Precio Público FT, nombre a partir de la descripción, descripción con talle y observaciones. Así se muestran en la tienda.
+  - En los productos que ya existen se completan los valores vacíos. Hay una opción para reemplazarlos por los de la planilla. Nunca se pisa el nombre.
+  - La compra queda registrada con sus montos reales (sin IVA, con IVA y venta estimada), así que impacta en Compras y en Flujo de caja.
+  - La vista previa de la importación muestra el multiplicador y el precio de cada artículo.
+- **Datos de producción:** se reparó la importación de "Marzin.xlsb" hecha con la versión anterior. Antes se tomó el backup `pecados_ANTES_FIX_MARZIN_20261102_1444`.
+  - Se recuperaron los nombres, descripciones y observaciones de 16 productos, que habían quedado como "Artículo …", desde el punto del 27/10.
+  - Los 4 productos nuevos (2131_T1/T2, blanco y negro) tomaron nombre y descripción de la planilla.
+  - La compra quedó con $151.191 sin IVA, $183.047,32 con IVA, 43 unidades y $500.000 de venta estimada. Antes tenía todo en $0.
+
 ## 2026-10-27
 - **Datos de producción:** nuevo punto de restauración `pecados_OPERATIVO_20261027_0010`, con la mercadería real cargada: 57 productos, 86 unidades y 3 registros manuales de caja.
 - `4e3fb25` **Productos:** al editar un artículo y cambiarle el código ya no se duplica. Se actualiza el mismo artículo y su foto pasa al código nuevo.
