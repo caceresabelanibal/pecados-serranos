@@ -268,6 +268,12 @@ export default function PecadosPage() {
     stockFinal: number;
     action: "new" | "restock";
     selected: boolean;
+    // Lo que trae la planilla (0 / "" si no lo trae): se usa para completar o actualizar el producto
+    fileCostoSinIva: number;
+    fileMultiplicador: number;
+    filePrecioEfectivo: number;
+    fileDescription: string;
+    fileObservaciones: string;
   }
 
   const [showImportModal, setShowImportModal] = useState(false);
@@ -285,6 +291,9 @@ export default function PecadosPage() {
   const [importSearchQuery, setImportSearchQuery] = useState("");
   const [importFilterTab, setImportFilterTab] = useState<"all" | "new" | "restock">("all");
   const [isImportingToDb, setIsImportingToDb] = useState(false);
+  // Productos que ya existen: reemplazar costo, multiplicador y precio por los de la planilla
+  // (si no, sólo se completan los que están vacíos)
+  const [importOverwritePrices, setImportOverwritePrices] = useState(false);
 
   // Map of recently imported items for visual marking in Stock view
   const [recentlyImportedMap, setRecentlyImportedMap] = useState<
@@ -294,54 +303,102 @@ export default function PecadosPage() {
   const [importSuccessBanner, setImportSuccessBanner] = useState<string | null>(null);
   const importFileInputRef = useRef<HTMLInputElement>(null);
 
-  // Helper para procesar datos de planilla Excel de compra
-  const processImportData = (rows: any[]) => {
+  // Helper para procesar datos de planilla Excel de compra.
+  // Acepta el pedido del proveedor (Cod. / #Pedida / P.U. / Imp.) y la planilla de costos
+  // (Código / Cantidad / SIN IVA / CON IVA / Ganancia / Publico Efectivo c/u / Descripcion / Talle).
+  // Los encabezados se comparan sin mayúsculas, acentos ni espacios de más.
+  const processImportData = (rows: Record<string, unknown>[]) => {
     const items: ImportPurchaseItem[] = [];
     let totalUnits = 0;
     let totalCostConIva = 0;
     let newCount = 0;
     let restockCount = 0;
 
-    for (let idx = 0; idx < rows.length; idx++) {
-      const row = rows[idx];
+    const norm = (k: string) =>
+      k
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .trim();
+    const num = (v: unknown) => {
+      if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+      const t = String(v ?? "").replace(/[^0-9.,-]/g, "");
+      // "1.234,56" (formato argentino) o "1234.56"
+      const n = t.includes(",") ? Number(t.replace(/\./g, "").replace(",", ".")) : Number(t);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const clean = (v: unknown) => String(v ?? "").replace(/\s+/g, " ").trim();
+    // "COLALESS - BLANCO DE TUL" -> "Colaless - blanco de tul" (los títulos en mayúsculas gritan en la tienda)
+    const sentence = (t: string) => {
+      const lower = t.toLocaleLowerCase("es-AR");
+      return lower.charAt(0).toLocaleUpperCase("es-AR") + lower.slice(1);
+    };
+
+    for (const raw of rows) {
+      // Primera columna con cada nombre (las planillas repiten "SIN IVA"/"CON IVA" para los totales)
+      const row = new Map<string, unknown>();
+      for (const [k, v] of Object.entries(raw)) {
+        const nk = norm(k);
+        if (!row.has(nk)) row.set(nk, v);
+      }
       const findVal = (keys: string[]) => {
         for (const k of keys) {
-          if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== "") {
-            return row[k];
-          }
+          const v = row.get(k);
+          if (v !== undefined && v !== null && String(v).trim() !== "") return v;
         }
         return "";
       };
 
-      const rawSku = findVal(["Cod.", "Codigo", "Código", "SKU", "Cod", "Articulo", "C", "c"]);
-      const sku = String(rawSku).trim().toUpperCase();
+      const sku = clean(findVal(["cod.", "codigo", "cod", "sku", "articulo", "c"])).toUpperCase();
       if (!sku) continue;
 
-      const rawQty = findVal(["#Pedida", "Cantidad", "Cant", "Cant.", "Pedida", "B", "b", "Stock"]);
-      const qty = Math.max(1, parseInt(String(rawQty).replace(/[^0-9]/g, "") || "1", 10));
+      const qty = Math.max(1, Math.round(num(findVal(["#pedida", "cantidad", "cant", "cant.", "pedida", "b", "stock"]))) || 1);
+      const costoSinIva = Math.max(0, num(findVal(["p.u.", "pu", "sin iva", "costo sin iva", "proveedor sin iva", "precio unitario", "costo", "d"])));
+      const imp = Math.max(0, num(findVal(["imp.", "iva", "impuesto", "e"])));
+      const conIvaFile = Math.max(0, num(findVal(["con iva", "proveedor con iva", "costo con iva"])));
+      const ganancia = Math.max(0, num(findVal(["ganancia", "ganancia sugerida"])));
+      const multFile = num(findVal(["multiplicador", "multiplicador de ganancia", "mult"]));
+      const ftFile = Math.max(0, num(findVal(["publico efectivo c/u", "publico efectivo", "precio publico ft", "precio efectivo", "efectivo"])));
+      const descRaw = String(findVal(["descripcion", "detalle", "producto", "titulo", "nombre", "comentarios", "g"])).trim();
+      const desc = clean(descRaw);
+      const talle = clean(findVal(["talle", "talles"]));
+      const obs = clean(findVal(["observaciones", "obs", "notas"]));
+      const rawImage = clean(findVal(["imagen", "foto", "image", "url", "a"]));
+      const rawTipo = clean(findVal(["tipo", "categoria"]));
 
-      const rawPU = findVal(["P.U.", "PU", "Precio Unitario", "Costo", "Costo sin IVA", "D", "d"]);
-      const costoSinIva = parseFloat(String(rawPU).replace(/[^0-9.-]/g, "") || "0");
-
-      const rawImp = findVal(["Imp.", "IVA", "Impuesto", "E", "e"]);
-      const imp = parseFloat(String(rawImp).replace(/[^0-9.-]/g, "") || "0");
-
-      // Costo de la factura (lo efectivamente pagado): P.U. + Imp. del Excel
-      const rawCostoConIva = imp > 0 ? costoSinIva + imp : proveedorConIva(costoSinIva);
-
-      const rawDesc = findVal(["Descripcion", "Descripción", "Detalle", "Producto", "Titulo", "Título", "Nombre", "Comentarios", "G", "g"]);
-      const rawImage = findVal(["Imagen", "Foto", "Image", "URL", "A", "a"]);
-      const rawTipo = findVal(["Tipo", "Categoria", "Categoría"]);
+      // Costo de la factura (lo efectivamente pagado): CON IVA de la planilla, o P.U. + Imp., o +21%
+      const rawCostoConIva = conIvaFile > 0 ? conIvaFile : imp > 0 ? costoSinIva + imp : proveedorConIva(costoSinIva);
+      // Multiplicador: el de la planilla, o Ganancia / Costo con IVA (redondeado a 2 decimales)
+      const baseGanancia = conIvaFile > 0 ? conIvaFile : proveedorConIva(costoSinIva);
+      const multCalc = isValidMultiplier(multFile)
+        ? multFile
+        : ganancia > 0 && baseGanancia > 0
+        ? Math.round((ganancia / baseGanancia) * 100) / 100
+        : 0;
+      const fileMultiplicador = isValidMultiplier(multCalc) ? multCalc : 0;
+      const description = [desc, talle ? `Talle: ${talle}` : ""].filter(Boolean).join("\n");
+      // Título: la primera parte de la descripción (antes de "COLORES:", de un punto o de un bloque de espacios),
+      // cortado en una palabra completa
+      const firstPart = clean(descRaw.split(/\s{2,}|\.\s|\s+colores?:/i)[0].replace(/\.$/, ""));
+      const shortTitle = firstPart.length > 80 ? firstPart.slice(0, 80).replace(/\s+\S*$/, "") : firstPart;
+      const fileTitle = shortTitle ? sentence(shortTitle) + (talle ? ` (${talle})` : "") : "";
 
       // Verificar si ya existe en el catálogo actual
       const existing = products.find((p) => (p.sku || "").toUpperCase() === sku);
+      const fileData = {
+        fileCostoSinIva: costoSinIva,
+        fileMultiplicador,
+        filePrecioEfectivo: ftFile,
+        fileDescription: description,
+        fileObservaciones: obs,
+      };
 
       if (existing) {
         restockCount++;
         const currentStock = existing.stock;
         const finalStock = currentStock + qty;
-        // Costo de esta factura (para el registro de la compra). El costo del producto en
-        // Flujo de caja no se modifica al confirmar.
+        // Costo de esta factura (para el registro de la compra)
         const cSin = costoSinIva > 0 ? costoSinIva : existing.costoSinIva || 0;
         const cCon = costoSinIva > 0 ? rawCostoConIva : proveedorConIva(cSin);
 
@@ -356,30 +413,25 @@ export default function PecadosPage() {
           image: existing.image || rawImage || "/pecados/auriculares.jpg",
           costoSinIva: cSin,
           costoConIva: cCon,
-          multiplicador: isValidMultiplier(existing.multiplicadorGanancia) ? existing.multiplicadorGanancia : 0,
-          precioEfectivo: existing.precioEfectivo ?? 0,
-          precioTarjeta: precioPublicoTC(existing.precioEfectivo ?? 0),
+          multiplicador: isValidMultiplier(existing.multiplicadorGanancia) ? existing.multiplicadorGanancia : fileMultiplicador,
+          precioEfectivo: existing.precioEfectivo || ftFile,
+          precioTarjeta: precioPublicoTC(existing.precioEfectivo || ftFile),
           cantidadComprada: qty,
           stockActual: currentStock,
           stockFinal: finalStock,
           action: "restock",
           selected: true,
+          ...fileData,
         });
       } else {
         newCount++;
         const vshopMatch = VSHOP_CATALOG_DICT[sku];
-        const title = vshopMatch?.title || rawDesc || `Artículo ${sku}`;
+        const title = vshopMatch?.title || fileTitle || `Artículo ${sku}`;
         const tipo = vshopMatch?.tipo || rawTipo || "Sex Shop";
         const category = vshopMatch?.category || rawTipo || "Sex Shop";
-        const cSin = costoSinIva;
-        const cCon = rawCostoConIva;
-        // Multiplicador y Precio Público FT los define el administrador en Flujo de caja
-        const mult = 0;
-        const precioEfectivo = 0;
-        const precioTarjeta = 0;
 
         totalUnits += qty;
-        totalCostConIva += cCon * qty;
+        totalCostConIva += rawCostoConIva * qty;
 
         items.push({
           sku,
@@ -387,22 +439,24 @@ export default function PecadosPage() {
           tipo,
           category,
           image: rawImage || `/api/pecados/imagen/${encodeURIComponent(sku)}`,
-          costoSinIva: cSin,
-          costoConIva: cCon,
-          multiplicador: mult,
-          precioEfectivo,
-          precioTarjeta,
+          costoSinIva,
+          costoConIva: rawCostoConIva,
+          // Si la planilla trae multiplicador (o ganancia) y precio, el producto queda completo
+          multiplicador: fileMultiplicador,
+          precioEfectivo: ftFile,
+          precioTarjeta: precioPublicoTC(ftFile),
           cantidadComprada: qty,
           stockActual: 0,
           stockFinal: qty,
           action: "new",
           selected: true,
+          ...fileData,
         });
       }
     }
 
     if (items.length === 0) {
-      setImportError("No se detectaron artículos válidos en el archivo. Verificá que contenga columnas como 'Cod.', '#Pedida' o 'P.U.'.");
+      setImportError("No se detectaron artículos válidos en el archivo. Verificá que tenga una columna de código (Código / Cod.) y de cantidad.");
       return;
     }
 
@@ -437,7 +491,12 @@ export default function PecadosPage() {
 
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
-        const data = XLSX.utils.sheet_to_json<any>(worksheet, { defval: "" });
+        // Fila de encabezados: la primera (de las 15 primeras) que tenga una columna de código
+        const grid = XLSX.utils.sheet_to_json<unknown[]>(worksheet, { header: 1, defval: "" });
+        const isCodeHeader = (v: unknown) =>
+          /^(cod\.?|codigo|código|sku|articulo|artículo)$/i.test(String(v).replace(/\s+/g, " ").trim());
+        const headerRow = Math.max(0, grid.slice(0, 15).findIndex((r) => Array.isArray(r) && r.some(isCodeHeader)));
+        const data = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: "", range: headerRow });
 
         if (!data || data.length === 0) {
           setImportError("La planilla Excel está vacía.");
@@ -491,7 +550,13 @@ export default function PecadosPage() {
 
         const subtotalSin = Math.round(item.costoSinIva * item.cantidadComprada * 100) / 100;
         const subtotalCon = Math.round(item.costoConIva * item.cantidadComprada * 100) / 100;
-        const subtotalVenta = Math.round(item.precioEfectivo * item.cantidadComprada * 100) / 100;
+        // Venta estimada: con el precio que va a quedar en el producto (el de la planilla si no tenía)
+        const existingForPrice = updatedProducts.find((p) => (p.sku || "").toUpperCase() === item.sku.toUpperCase());
+        const ventaUnit =
+          existingForPrice && existingForPrice.precioEfectivo && !importOverwritePrices
+            ? existingForPrice.precioEfectivo
+            : item.filePrecioEfectivo || item.precioEfectivo || existingForPrice?.precioEfectivo || 0;
+        const subtotalVenta = Math.round(ventaUnit * item.cantidadComprada * 100) / 100;
         totalCostSinIvaSum += subtotalSin;
         totalCostConIvaSum += subtotalCon;
         totalSaleSum += subtotalVenta;
@@ -504,17 +569,25 @@ export default function PecadosPage() {
           const prevStock = existing.stock;
           const finalStock = existing.stock + item.cantidadComprada;
 
+          // Costo, multiplicador y precio: los de Flujo de stock mandan; la planilla completa los que
+          // faltan (o los reemplaza si se eligió "actualizar con los valores de la planilla")
+          const pick = (current: number | undefined, fromFile: number, valid: (n: number) => boolean) =>
+            fromFile > 0 && valid(fromFile) && (importOverwritePrices || !(current && valid(current))) ? fromFile : current || 0;
+          const newSinIva = pick(existing.costoSinIva, item.fileCostoSinIva, (n) => n > 0);
+          const newMult = pick(existing.multiplicadorGanancia, item.fileMultiplicador, (n) => isValidMultiplier(n));
+          const newFt = pick(existing.precioEfectivo, item.filePrecioEfectivo, (n) => n > 0);
           updatedProducts[existingIndex] = {
             ...existing,
             stock: finalStock,
-            // El costo de Flujo de caja manda; sólo se toma el de la factura si no había uno
-            costoSinIva: existing.costoSinIva && existing.costoSinIva > 0 ? existing.costoSinIva : item.costoSinIva,
-            costoConIva: proveedorConIva(
-              existing.costoSinIva && existing.costoSinIva > 0 ? existing.costoSinIva : item.costoSinIva
-            ),
-            costPrice: proveedorConIva(
-              existing.costoSinIva && existing.costoSinIva > 0 ? existing.costoSinIva : item.costoSinIva
-            ),
+            costoSinIva: newSinIva,
+            costoConIva: proveedorConIva(newSinIva),
+            costPrice: proveedorConIva(newSinIva),
+            multiplicadorGanancia: newMult,
+            gananciaSugerida: proveedorConIva(newSinIva) * newMult,
+            precioEfectivo: newFt,
+            price: newFt,
+            precioTarjeta: precioPublicoTC(newFt),
+            description: existing.description || item.fileDescription,
             image:
               (!existing.image || existing.image.includes("auriculares")) && item.image
                 ? item.image
@@ -538,8 +611,8 @@ export default function PecadosPage() {
             costoConIva: item.costoConIva,
             subtotalCostoSinIva: subtotalSin,
             subtotalCostoConIva: subtotalCon,
-            precioEfectivo: item.precioEfectivo,
-            precioTarjeta: item.precioTarjeta,
+            precioEfectivo: ventaUnit,
+            precioTarjeta: precioPublicoTC(ventaUnit),
             subtotalVentaEstimada: subtotalVenta,
             stockAnterior: prevStock,
             stockFinal: finalStock,
@@ -566,9 +639,9 @@ export default function PecadosPage() {
             precioFinalProveedor: 0,
             stock: item.cantidadComprada,
             minStock: 2,
-            observaciones: "Ingresado por importación de compra Excel",
+            observaciones: item.fileObservaciones || "Ingresado por importación de compra Excel",
             image: item.image || "/pecados/auriculares.jpg",
-            description: item.title,
+            description: item.fileDescription || item.title,
           };
 
           updatedProducts = [newProduct, ...updatedProducts];
@@ -590,8 +663,8 @@ export default function PecadosPage() {
             costoConIva: item.costoConIva,
             subtotalCostoSinIva: subtotalSin,
             subtotalCostoConIva: subtotalCon,
-            precioEfectivo: item.precioEfectivo,
-            precioTarjeta: item.precioTarjeta,
+            precioEfectivo: ventaUnit,
+            precioTarjeta: precioPublicoTC(ventaUnit),
             subtotalVentaEstimada: subtotalVenta,
             stockAnterior: 0,
             stockFinal: item.cantidadComprada,
@@ -628,9 +701,12 @@ export default function PecadosPage() {
       setAdminTab("cashflow");
       setImportSuccessBanner(
         `Se importaron con éxito ${totalUnits} unidades en ${selectedItems.length} artículos (${addedCount} nuevos y ${restockedCount} con stock sumado). Registrado en Historial de Compras ("${newPurchaseRecord.fileName}").` +
-          (addedCount > 0
-            ? ` Los ${addedCount} artículos nuevos quedan INCOMPLETOS hasta que cargues el multiplicador y el Precio Público FT: no se muestran en la tienda.`
-            : "")
+          (() => {
+            const incomplete = updatedProducts.filter((p) => newImportedMap[(p.sku || "").toUpperCase()] && missingFields(p).length > 0).length;
+            return incomplete > 0
+              ? ` ${incomplete} artículos quedan INCOMPLETOS hasta que cargues el multiplicador y el Precio Público FT en Flujo de stock: no se muestran en la tienda.`
+              : " Todos quedaron completos (costo, multiplicador y precio) y se muestran en la tienda.";
+          })()
       );
     } catch (err: any) {
       alert("Error al importar la compra: " + (err?.message || err));
@@ -6505,6 +6581,21 @@ export default function PecadosPage() {
                       </div>
                     )}
 
+                    {importStats && importStats.restockCount > 0 && (
+                      <label className="flex items-start gap-2 p-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-zinc-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={importOverwritePrices}
+                          onChange={(e) => setImportOverwritePrices(e.target.checked)}
+                          className="mt-0.5"
+                        />
+                        <span>
+                          <strong className="text-white">Actualizar costo, multiplicador y precio</strong> de los {importStats.restockCount} productos que ya
+                          existen con los valores de la planilla. Si no lo marcás, sólo se completan los que están vacíos.
+                        </span>
+                      </label>
+                    )}
+
                     {/* Toolbar de Filtro y Búsqueda en Preview */}
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-1">
                       <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
@@ -6578,6 +6669,8 @@ export default function PecadosPage() {
                               <th className="p-2.5 text-center">Cantidad Compra</th>
                               <th className="p-2.5 text-center">Stock Resultante</th>
                               <th className="p-2.5 text-right">Costo c/IVA</th>
+                              <th className="p-2.5 text-center">Mult.</th>
+                              <th className="p-2.5 text-right">Precio FT</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-zinc-800/60 font-mono text-[11px]">
@@ -6599,7 +6692,7 @@ export default function PecadosPage() {
                               if (previewList.length === 0) {
                                 return (
                                   <tr>
-                                    <td colSpan={6} className="py-8 text-center text-zinc-500 font-sans">
+                                    <td colSpan={8} className="py-8 text-center text-zinc-500 font-sans">
                                       No hay filas que coincidan con el filtro actual.
                                     </td>
                                   </tr>
@@ -6674,6 +6767,16 @@ export default function PecadosPage() {
                                   </td>
                                   <td className="p-2.5 text-right text-amber-300 font-mono">
                                     ${item.costoConIva.toLocaleString("es-AR")}
+                                  </td>
+                                  <td className="p-2.5 text-center text-rose-300 font-mono">
+                                    {item.fileMultiplicador || item.multiplicador || <span className="text-amber-400 font-sans">falta</span>}
+                                  </td>
+                                  <td className="p-2.5 text-right text-emerald-300 font-mono">
+                                    {item.filePrecioEfectivo || item.precioEfectivo ? (
+                                      `$${(item.filePrecioEfectivo || item.precioEfectivo).toLocaleString("es-AR")}`
+                                    ) : (
+                                      <span className="text-amber-400 font-sans">falta</span>
+                                    )}
                                   </td>
                                 </tr>
                               ));
