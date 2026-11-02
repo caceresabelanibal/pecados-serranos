@@ -4,6 +4,7 @@
 > Formato: fecha · commit · qué cambió (para el dueño de la tienda, sin tecnicismos de más).
 
 ## 2026-11-02
+- **Datos de producción:** a pedido del dueño, los 20 productos de "Marzin.xlsb" pasaron a tener el **nombre y la descripción de la planilla** (descripción en minúsculas + talle), en lugar de los del 27/10. También se actualizó el detalle de la compra. Antes se tomó el backup `pecados_ANTES_NOMBRES_MARZIN_20261102_1449`.
 - `f55eea6` **Importar Excel:** ahora reconoce la planilla de costos (Código, Tipo, Talle, Descripcion, SIN IVA, CON IVA, Ganancia, Cantidad, Publico Efectivo c/u, Observaciones), además del pedido del proveedor.
   - Los encabezados se comparan sin mayúsculas, acentos ni espacios de más. También encuentra la fila de encabezados aunque haya títulos arriba.
   - Los productos nuevos quedan completos: costo, multiplicador (Ganancia ÷ Costo con IVA), Precio Público FT, nombre a partir de la descripción, descripción con talle y observaciones. Así se muestran en la tienda.
