@@ -109,6 +109,7 @@ Los accesos no tienen botones en la tienda: se entra escribiendo la URL.
   - Debe = entra; Haber = sale.
   - Cuentas fijas: Ventas, Compras a proveedores y Comisiones.
   - Además, una cuenta por cada categoría de **registro manual** (ej: perchas, posnet, aporte de capital).
+- **Inversión total (c/IVA):** compras a proveedores (con IVA) + registros manuales del Haber (etiquetas, bolsas, mobiliario, posnet…). No incluye los retiros del dueño ni las comisiones. El margen de la venta proyectada se calcula contra este total.
 - **Movimientos:** planilla con saldo acumulado, búsqueda y período.
 - Se puede exportar a Excel e imprimir (o guardar como PDF).
 

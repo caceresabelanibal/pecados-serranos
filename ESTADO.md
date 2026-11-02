@@ -4,7 +4,7 @@
 > ⚠️ Repo público: sin contraseñas, tokens ni datos personales.
 
 **Última actualización:** 2026-11-02
-**Versión en producción:** commit `f55eea6` (importación de Excel con la planilla de costos). En producción coincide con GitHub (`master`).
+**Versión en producción:** commit `14294b5` (inversión total con los gastos manuales). En producción coincide con GitHub (`master`).
 
 ## Funciona en producción
 
