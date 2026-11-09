@@ -3,6 +3,17 @@
 > Historial de cambios, el más nuevo arriba. Se agrega una entrada con cada cambio publicado.
 > Formato: fecha · commit · qué cambió (para el dueño de la tienda, sin tecnicismos de más).
 
+## 2026-11-09
+- `caa00aa`, `ff77d43` **Revendedoras: stock y comisiones.**
+  - **Entregar mercadería a una revendedora ya no baja el stock.** Baja recién cuando se vende: venta de la tienda, venta registrada por la revendedora o rendición del lote. Así la tienda online ya no muestra "sin stock" un artículo que solo está prestado.
+  - Al entregar, el disponible es el stock menos lo que ya tienen las revendedoras. Devolver no cambia el stock.
+  - **La comisión se define por producto** en Flujo de stock (nueva columna "Comisión c/u", vacía = a definir). Es la misma para todas las revendedoras.
+  - Se sacó la comisión del formulario "Entregar mercadería" y de la tabla de lotes, donde ahora se muestra la del producto.
+  - Al cargar la comisión de un producto, se completan las ventas que la tenían "a definir".
+- **Datos de producción** (antes se tomó el backup `pecados_ANTES_STOCK_REVENDEDORAS_20261109_1559`):
+  - Las 16 unidades que tenía Agostina volvieron al stock: 2131_T1/T2 B/N +1 cada uno y LEB482 +12. El stock total pasó de 71 a 87 unidades.
+  - Las comisiones de los lotes pasaron a sus productos: 2131 = $2.080, LEB482 = $2.000, B073N = $6.725.
+
 ## 2026-11-02
 - `14294b5` **Flujo de caja:** la tarjeta "Inversión total (c/IVA)" ahora suma las compras a proveedores **y** los gastos cargados a mano en el Haber (etiquetas, bolsas, mobiliario, posnet…), salvo los retiros del dueño. Debajo muestra el desglose. El margen de la venta proyectada se calcula contra ese total. Hoy: $720.748,32 + $101.000 = $821.748,32.
 - **Datos de producción:** a pedido del dueño, los 20 productos de "Marzin.xlsb" pasaron a tener el **nombre y la descripción de la planilla** (descripción en minúsculas + talle), en lugar de los del 27/10. También se actualizó el detalle de la compra. Antes se tomó el backup `pecados_ANTES_NOMBRES_MARZIN_20261102_1449`.

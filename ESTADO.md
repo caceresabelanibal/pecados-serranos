@@ -3,8 +3,8 @@
 > Foto del sistema **hoy**. Se actualiza después de cada cambio.
 > ⚠️ Repo público: sin contraseñas, tokens ni datos personales.
 
-**Última actualización:** 2026-11-02
-**Versión en producción:** commit `14294b5` (inversión total con los gastos manuales). En producción coincide con GitHub (`master`).
+**Última actualización:** 2026-11-09
+**Versión en producción:** commit `ff77d43` (stock de revendedoras al vender y comisión por producto). En producción coincide con GitHub (`master`).
 
 ## Funciona en producción
 
@@ -70,13 +70,14 @@
 
 ## Pendientes y avisos
 
-- [ ] **Datos posteriores al punto de restauración:** el punto vigente es del 27/10. Después se importó "Marzin.xlsb" (4 productos nuevos y la compra) y se repararon nombres. Hoy hay 59 productos activos y 86 unidades. Si se restaura, eso se pierde: conviene crear un punto nuevo.
+- [ ] **Datos posteriores al punto de restauración:** el punto vigente es del 27/10. Después se importó "Marzin.xlsb" (4 productos nuevos y la compra), se repararon nombres, se entregaron lotes y se migró el stock de revendedoras. Hoy hay 59 productos activos y 87 unidades. Si se restaura, eso se pierde: conviene crear un punto nuevo.
 - [ ] **CON IVA de la planilla:** en algunos artículos el CON IVA de "Marzin.xlsb" no es exactamente SIN IVA × 1,21 (ej. FR510: $6.699,87 contra $6.582,40). En la compra se registra el de la planilla; en Flujo de stock se calcula con el 21%.
 
 - [ ] **Precio a revisar:** el producto SS-SA-1342 tiene Precio Público FT 112,2 (¿112.200?).
 - [ ] **IVA:** los artículos "SS-" vienen con IVA 10,5% en las facturas del proveedor; la app usa 21%.
 - [ ] **Diferencia de compras:** hay $10.491,97 de diferencia entre "TOTAL PAGADO" de VShop y el total de las facturas.
-- [ ] **Comisión sin definir:** el lote entregado a la revendedora no tiene comisión por unidad definida.
+- [ ] **Comisiones por producto:** 6 productos ya tienen comisión. El resto figura "a definir" en Flujo de stock hasta que se cargue.
+- [ ] **Stock compartido:** una unidad que tiene una revendedora también se ve disponible en la tienda online. Si se vende online, hay que coordinar con la revendedora.
 - [ ] **Seguridad recomendada:**
   - Cambiar la contraseña root del servidor.
   - Usar claves SSH + fail2ban.

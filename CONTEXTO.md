@@ -91,11 +91,15 @@ Los accesos no tienen botones en la tienda: se entra escribiendo la URL.
 
 - Cada una puede tener código propio (para el carrito) y usuario y contraseña para /asociado.
 - El alta se hace en un solo paso, validado en el servidor, para evitar duplicados.
-- **Mercadería en consignación (lotes):** al entregarla se descuenta del depósito. La comisión por unidad la define el admin en cada lote.
-- **Comisión:** monto fijo por unidad.
-  - En la venta de un lote se usa la del lote.
-  - En ventas con código o del depósito, se usa la del último lote de ese artículo; si no hay, la última definida a mano.
-  - Si no hay ninguna, queda "a definir".
+- **Mercadería en consignación (lotes):**
+  - Entregarla **no baja el stock**: las unidades en manos de revendedoras siguen siendo stock de la tienda y se ven disponibles en la tienda online.
+  - El stock baja **recién cuando se vende**: la tienda vende, la revendedora registra la venta de su lote, o el admin rinde el lote.
+  - Lo devuelto no cambia el stock. Anular una venta devuelve el stock y, si salió de un lote, también la unidad "en mano".
+  - Para entregar, el disponible es el stock menos lo que ya está en manos de revendedoras.
+- **Comisión:** monto fijo por unidad, definido **por producto** en Flujo de stock (columna "Comisión c/u").
+  - Es la misma para todas las revendedoras y para cualquier forma de venta: lote, depósito o compra con su código.
+  - Si el producto no tiene comisión, la venta queda "a definir". Al cargarla en el producto, se completan solas todas las ventas pendientes de ese producto.
+  - Los lotes guardan la comisión que tenía el producto al entregarlo, solo como referencia.
 - **¿Quién paga la comisión?**
   - **Ventas que cobra ella** (las que carga en /asociado o las rendiciones de lotes): ella le paga a la tienda el total menos su comisión ("Pago a tienda") y la comisión queda "descontada al rendir". El admin marca la venta como **rendida** cuando recibe el pago.
   - **Ventas que cobra la tienda** (compras online con su código): la tienda le **adeuda** la comisión. El admin la marca **pagada** con fecha. Ella lo ve en "Mis comisiones".
