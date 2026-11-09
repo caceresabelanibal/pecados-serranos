@@ -3663,7 +3663,7 @@ export default function PecadosPage() {
                     setConsignmentForm({
                       resellerId: resellers[0]?.id || "",
                       notes: "",
-                      items: [newConsignmentRow(products.find((p) => p.stock > 0))],
+                      items: [newConsignmentRow(products.find((p) => p.stock - unitsWithResellers(p.id) > 0))],
                     });
                     setShowConsignmentModal(true);
                   }}
@@ -6109,7 +6109,9 @@ export default function PecadosPage() {
                           items: [
                             ...consignmentForm.items,
                             newConsignmentRow(
-                              products.find((p) => p.stock > 0 && !consignmentForm.items.some((it) => it.productId === p.id))
+                              products.find(
+                                (p) => p.stock - unitsWithResellers(p.id) > 0 && !consignmentForm.items.some((it) => it.productId === p.id)
+                              )
                             ),
                           ],
                         })

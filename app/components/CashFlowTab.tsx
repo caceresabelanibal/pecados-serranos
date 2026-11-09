@@ -82,7 +82,7 @@ function CommissionCell({ value, onCommit }: { value: number | null | undefined;
       min={0}
       step="0.01"
       value={draft ?? current}
-      placeholder="A definir"
+      placeholder="Definir"
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => {
