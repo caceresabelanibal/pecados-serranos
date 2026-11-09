@@ -354,6 +354,7 @@ async function getFullState() {
         stock: p.stock,
         minStock: p.minStock,
         observaciones: p.observaciones,
+        commissionPerUnit: p.commissionPerUnit,
         image: p.image,
       }));
 

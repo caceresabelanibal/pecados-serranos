@@ -62,8 +62,8 @@ async function buildSale(tx: Prisma.TransactionClient, reseller: Reseller, input
   for (const [key, qty] of input.wanted) {
     const id = key.slice(2);
     if (key.startsWith("c:")) {
-      // Venta de su mercadería: se descuenta de lo que tiene en mano (el stock del depósito
-      // ya bajó al entregársela). Sólo consignaciones propias con unidades pendientes.
+      // Venta de su mercadería: se descuenta de lo que tiene en mano y recién ahora del stock de la
+      // tienda (entregarle mercadería no baja el stock). Sólo consignaciones propias con unidades pendientes.
       const n = await tx.$executeRaw`
         UPDATE "PecadoConsignment"
         SET "quantitySold" = "quantitySold" + ${qty},
@@ -80,7 +80,10 @@ async function buildSale(tx: Prisma.TransactionClient, reseller: Reseller, input
         });
       }
       fromConsignment = true;
-      // Comisión: la del lote vendido
+      // El stock total baja al venderse (nunca por debajo de 0)
+      await tx.$executeRaw`UPDATE "PecadoProduct" SET stock = GREATEST(0, stock - ${qty}) WHERE id = ${c.productId}`;
+      // Comisión: la del producto (Flujo de stock); si no tiene, la que se había puesto en el lote
+      const productCommission = await commissionUnitFor(tx, reseller.id, c.productId);
       items.push(
         withCommission(
           {
@@ -92,7 +95,7 @@ async function buildSale(tx: Prisma.TransactionClient, reseller: Reseller, input
             subtotal: Math.round(c.unitAgreedPrice * qty * 100) / 100,
             consignmentId: c.id,
           },
-          c.commissionPerUnit
+          productCommission ?? c.commissionPerUnit
         )
       );
       continue;

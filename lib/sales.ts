@@ -8,8 +8,8 @@ interface StockItem {
   consignmentId: string | null;
 }
 
-// Devuelve el stock de los ítems de una venta: lo que salió de un lote en consignación vuelve
-// a "en mano" de la revendedora; lo que salió del depósito vuelve al stock de la tienda.
+// Devuelve el stock de los ítems de una venta: siempre vuelve al stock de la tienda, y si salió de
+// un lote en consignación, además vuelve a "en mano" de la revendedora.
 export async function restoreSaleStock(
   db: Db,
   sale: { resellerId: string | null; notes: string; stockApplied?: boolean; items: StockItem[] }
@@ -34,7 +34,8 @@ export async function restoreSaleStock(
             "status" = CASE WHEN GREATEST(0, "quantitySold" - ${i.quantity}) + "quantityReturned" >= "quantityGiven" THEN 'settled' ELSE 'active' END,
             "updatedAt" = NOW()
         WHERE id = ${lotId}`;
-    } else if (i.productId) {
+    }
+    if (i.productId) {
       await db.pecadoProduct.updateMany({ where: { id: i.productId }, data: { stock: { increment: i.quantity } } });
     }
   }

@@ -12,6 +12,8 @@ export type PricingPatch = Partial<Pick<Product, "costoSinIva" | "multiplicadorG
 interface Props {
   products: Product[];
   onUpdateProduct: (id: string, patch: PricingPatch) => void;
+  // Comisión de revendedora por unidad del producto (null = sin definir)
+  onSetCommission: (id: string, commissionUnit: number | null) => void;
   onEditProduct: (p: Product) => void;
   onOpenImport: () => void;
   importSuccessBanner: string | null;
@@ -62,9 +64,43 @@ function NumberCell({
   );
 }
 
+// Comisión por unidad: vacío = "a definir" (distinto de 0, que es "sin comisión")
+function CommissionCell({ value, onCommit }: { value: number | null | undefined; onCommit: (v: number | null) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const current = value === null || value === undefined ? "" : String(value);
+  const commit = () => {
+    if (draft === null) return;
+    const t = draft.trim().replace(",", ".");
+    setDraft(null);
+    const v = t === "" ? null : Number(t);
+    if (v !== null && (!Number.isFinite(v) || v < 0)) return;
+    if ((v === null ? "" : String(v)) !== current) onCommit(v);
+  };
+  return (
+    <input
+      type="number"
+      min={0}
+      step="0.01"
+      value={draft ?? current}
+      placeholder="A definir"
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Escape") setDraft(null);
+      }}
+      title="Comisión de la revendedora por unidad vendida (la misma para todas)"
+      className={`w-full px-2 py-1 rounded-lg bg-zinc-950 border text-xs text-center font-mono focus:outline-none focus:border-red-500 placeholder:text-amber-400/70 ${
+        current === "" ? "border-amber-700/70 text-amber-200" : "border-zinc-800 text-amber-300"
+      }`}
+    />
+  );
+}
+
 export default function CashFlowTab({
   products,
   onUpdateProduct,
+  onSetCommission,
   onEditProduct,
   onOpenImport,
   importSuccessBanner,
@@ -144,6 +180,7 @@ export default function CashFlowTab({
       "Ganancia total Maru": c.gananciaTotal,
       "Precio Publico FT": c.precioPublicoFT,
       "Precio Publico TC": c.precioPublicoTC,
+      "Comisión revendedora c/u": p.commissionPerUnit ?? "",
     }));
     data.push({
       Tipo: "TOTALES",
@@ -159,6 +196,7 @@ export default function CashFlowTab({
       "Ganancia total Maru": totals.gananciaTotal,
       "Precio Publico FT": totals.ft,
       "Precio Publico TC": totals.tc,
+      "Comisión revendedora c/u": "",
     });
     const ws = XLSX.utils.json_to_sheet(data);
     ws["!cols"] = [{ wch: 20 }, { wch: 16 }, { wch: 50 }, ...Array(10).fill({ wch: 16 })];
@@ -275,13 +313,14 @@ export default function CashFlowTab({
                 <th className={`${th} text-rose-300`}>Ganancia total Maru</th>
                 <th className={`${th} text-emerald-400 min-w-[110px]`}>Precio Publico FT</th>
                 <th className={`${th} text-blue-400`}>Precio Publico TC</th>
+                <th className={`${th} text-amber-300 min-w-[100px]`}>Comisión c/u</th>
                 <th className="p-2.5" />
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/60">
               {visible.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="py-10 text-center text-zinc-500">
+                  <td colSpan={13} className="py-10 text-center text-zinc-500">
                     No hay artículos para mostrar.
                   </td>
                 </tr>
@@ -353,6 +392,9 @@ export default function CashFlowTab({
                         />
                       </td>
                       <td className={`${td} text-blue-300 font-bold`}>{formatMoney(c.precioPublicoTC)}</td>
+                      <td className="p-2">
+                        <CommissionCell value={p.commissionPerUnit} onCommit={(v) => onSetCommission(p.id, v)} />
+                      </td>
                       <td className="p-2 text-center">
                         <button
                           type="button"
@@ -382,6 +424,7 @@ export default function CashFlowTab({
                 <td className={`${td} text-rose-300`}>{formatMoney(totals.gananciaTotal)}</td>
                 <td className={`${td} text-emerald-400`}>{formatMoney(totals.ft)}</td>
                 <td className={`${td} text-blue-300`}>{formatMoney(totals.tc)}</td>
+                <td />
                 <td />
               </tr>
             </tfoot>

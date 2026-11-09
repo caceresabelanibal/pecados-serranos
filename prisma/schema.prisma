@@ -24,6 +24,8 @@ model PecadoProduct {
   stock                 Int      @default(0)
   minStock              Int      @default(2)
   observaciones         String   @default("")
+  // Comisión de revendedora por unidad vendida (la misma para todas); null = a definir
+  commissionPerUnit     Float?
   image                 String   @default("/pecados/auriculares.jpg")
   active                Boolean  @default(true)
   createdAt             DateTime @default(now())

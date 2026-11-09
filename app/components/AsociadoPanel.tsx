@@ -13,6 +13,7 @@ interface AsociadoProduct {
   stock: number;
   precioFT: number;
   precioTC: number;
+  commissionPerUnit?: number | null;
 }
 interface AsociadoConsignment {
   id: string;
@@ -187,9 +188,11 @@ export default function AsociadoPanel({ onLogout }: Props) {
         available,
         unit: (m: PaymentMethod) => (isCashPriceMethod(m) ? p.precioFT : p.precioTC),
         list: p.precioTC,
-        // Del depósito: la comisión asignada para ese artículo en su último lote
+        // La comisión del producto (la misma para todas las revendedoras)
         commission:
-          (data?.consignments || []).find((c) => c.productId === p.id && c.commissionPerUnit !== null)?.commissionPerUnit ?? null,
+          p.commissionPerUnit ??
+          (data?.consignments || []).find((c) => c.productId === p.id && c.commissionPerUnit !== null)?.commissionPerUnit ??
+          null,
         };
       }),
     [data, editQty]

@@ -25,6 +25,7 @@ export async function GET(request: Request) {
     prisma.pecadoConsignment.findMany({ where: { resellerId: reseller.id }, orderBy: { date: "desc" } }),
   ]);
   const imageById = new Map(products.map((p) => [p.id, p.image]));
+  const commissionById = new Map(products.map((p) => [p.id, p.commissionPerUnit]));
 
   return NextResponse.json(
     {
@@ -68,7 +69,8 @@ export async function GET(request: Request) {
         quantityReturned: c.quantityReturned,
         pending: Math.max(0, c.quantityGiven - c.quantitySold - c.quantityReturned),
         unitAgreedPrice: c.unitAgreedPrice,
-        commissionPerUnit: c.commissionPerUnit,
+        // Comisión del producto (Flujo de stock); si no tiene, la que se puso en el lote
+        commissionPerUnit: commissionById.get(c.productId) ?? c.commissionPerUnit,
         status: c.status,
         notes: c.notes,
       })),
@@ -82,6 +84,7 @@ export async function GET(request: Request) {
           image: p.image,
           precioFT: p.precioEfectivo,
           precioTC: precioPublicoTC(p.precioEfectivo),
+          commissionPerUnit: p.commissionPerUnit,
         })),
     },
     { headers: NO_STORE }

@@ -30,6 +30,7 @@ export interface Product {
   
   // Notas & Multimedia
   observaciones?: string; // Col 14: Observaciones particulares del producto
+  commissionPerUnit?: number | null; // Comisión de revendedora por unidad (la misma para todas); null = a definir
   image: string;
 }
 

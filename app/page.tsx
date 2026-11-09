@@ -2002,6 +2002,17 @@ export default function PecadosPage() {
     setResellers((prev) => prev.filter((r) => r.id !== id));
   };
 
+  // Comisión por unidad que corresponde a un artículo (se define por producto en Flujo de stock)
+  const productCommission = (productId: string, fallback?: number | null) => {
+    const p = products.find((x) => x.id === productId);
+    return p?.commissionPerUnit ?? fallback ?? null;
+  };
+  // Unidades de un producto que están en manos de revendedoras (siguen siendo stock de la tienda)
+  const unitsWithResellers = (productId: string) =>
+    consignments
+      .filter((c) => c.productId === productId)
+      .reduce((t, c) => t + Math.max(0, c.quantityGiven - c.quantitySold - c.quantityReturned), 0);
+
   // Consignment delivery handler (Entregar mercadería para revender)
   const handleSaveConsignment = (e: React.FormEvent) => {
     e.preventDefault();
@@ -2015,7 +2026,7 @@ export default function PecadosPage() {
       return;
     }
 
-    // Validaciones: cantidad, comisión obligatoria por artículo y stock del depósito
+    // Validaciones: cantidad y stock disponible (lo que no está ya en manos de otra revendedora)
     const qtyByProduct = new Map<string, number>();
     for (const row of consignmentForm.items) {
       const product = products.find((p) => p.id === row.productId);
@@ -2027,22 +2038,18 @@ export default function PecadosPage() {
         alert(`Indicá la cantidad a entregar de "${product.title}".`);
         return;
       }
-      if (row.commissionPerUnit.trim() === "" || !(Number(row.commissionPerUnit) >= 0)) {
-        alert(`Falta la comisión por unidad de "${product.title}". Es obligatoria.`);
-        return;
-      }
       qtyByProduct.set(product.id, (qtyByProduct.get(product.id) || 0) + Number(row.quantity));
     }
     for (const [productId, qty] of qtyByProduct) {
       const product = products.find((p) => p.id === productId)!;
-      if (qty > product.stock) {
-        alert(`No hay stock suficiente de "${product.title}" en depósito. Disponible: ${product.stock} un.`);
+      const free = product.stock - unitsWithResellers(productId);
+      if (qty > free) {
+        alert(`No hay stock suficiente de "${product.title}" para entregar. Disponible: ${Math.max(0, free)} un. (${product.stock} en stock, ${unitsWithResellers(productId)} ya en manos de revendedoras).`);
         return;
       }
     }
 
-    // Descontar del depósito y crear un lote por artículo
-    const updatedProducts = products.map((p) => (qtyByProduct.has(p.id) ? { ...p, stock: p.stock - qtyByProduct.get(p.id)! } : p));
+    // Un lote por artículo. Entregar NO baja el stock: baja recién cuando se vende.
     const now = Date.now();
     const newConsignments: Consignment[] = consignmentForm.items.map((row, idx) => {
       const product = products.find((p) => p.id === row.productId)!;
@@ -2056,7 +2063,8 @@ export default function PecadosPage() {
         productTitle: product.title,
         quantityGiven: Number(row.quantity),
         unitAgreedPrice: Number(row.unitAgreedPrice) || product.precioEfectivo || product.price,
-        commissionPerUnit: Number(row.commissionPerUnit),
+        // Referencia histórica: la comisión que tenía el producto al entregarlo
+        commissionPerUnit: product.commissionPerUnit ?? null,
         quantitySold: 0,
         quantityReturned: 0,
         status: "active",
@@ -2064,37 +2072,18 @@ export default function PecadosPage() {
       };
     });
 
-    persistAllData(updatedProducts, sales, resellers, [...newConsignments, ...consignments]);
+    persistAllData(products, sales, resellers, [...newConsignments, ...consignments]);
     setShowConsignmentModal(false);
   };
 
-  // Definir o cambiar la comisión por unidad de un lote ya entregado
-  const handleSetLotCommission = (c: Consignment) => {
-    const value = window.prompt(
-      `Comisión por unidad vendida para "${c.productTitle}" (${c.resellerName}):`,
-      c.commissionPerUnit !== null && c.commissionPerUnit !== undefined ? String(c.commissionPerUnit) : ""
-    );
-    if (value === null) return;
-    const n = Number(value.replace(",", "."));
-    if (value.trim() === "" || !Number.isFinite(n) || n < 0) {
-      alert("Ingresá un monto válido (0 o más).");
-      return;
-    }
-    const updated = consignments.map((x) => (x.id === c.id ? { ...x, commissionPerUnit: n } : x));
-    persistAllData(products, sales, resellers, updated).then(() =>
-      // Las ventas de ese artículo que quedaron con comisión "a definir" toman este valor
-      applyPendingCommission(c.resellerId, c.productId, n)
-    );
-  };
-
-  // Comisión de artículos vendidos por una revendedora que quedaron "a definir"
-  // (ej: vendidos con su código sin habérsele entregado mercadería de ese artículo)
-  const applyPendingCommission = async (resellerId: string, productId: string, commissionUnit: number) => {
+  // Comisión de revendedora por unidad de un producto (la misma para todas). Completa también las
+  // ventas que la tenían "a definir". null = sin comisión definida.
+  const handleSetProductCommission = async (productId: string, commissionUnit: number | null) => {
     try {
       const res = await fetch("/api/admin/comisiones", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resellerId, productId, commissionUnit }),
+        body: JSON.stringify({ productId, commissionUnit }),
       });
       const out = await res.json().catch(() => ({}));
       if (!res.ok) alert(out.error || "No se pudo guardar la comisión.");
@@ -2104,15 +2093,18 @@ export default function PecadosPage() {
     fetchServerData();
   };
 
-  const handleDefineSoldCommission = (resellerId: string, resellerName: string, productId: string, productTitle: string) => {
-    const value = window.prompt(`Comisión por unidad vendida de "${productTitle}" para ${resellerName}:`, "");
+  const handleDefineSoldCommission = (_resellerId: string, _resellerName: string, productId: string, productTitle: string) => {
+    const value = window.prompt(
+      `Comisión por unidad de "${productTitle}" (se aplica a todas las revendedoras; también la podés cambiar en Flujo de stock):`,
+      ""
+    );
     if (value === null) return;
     const n = Number(value.replace(",", "."));
     if (value.trim() === "" || !Number.isFinite(n) || n < 0) {
       alert("Ingresá un monto válido (0 o más).");
       return;
     }
-    applyPendingCommission(resellerId, productId, n);
+    handleSetProductCommission(productId, n);
   };
 
   // Settle consignment (Rendir cuentas con revendedor)
@@ -2135,17 +2127,17 @@ export default function PecadosPage() {
       return;
     }
 
-    // 1. Reingresar las unidades devueltas al stock del depósito
+    // 1. Stock: lo vendido baja ahora; lo devuelto no cambia (entregar no lo había bajado)
     const updatedProducts = products.map((p) =>
-      p.id === settlingConsignment.productId ? { ...p, stock: p.stock + returned } : p
+      p.id === settlingConsignment.productId ? { ...p, stock: Math.max(0, p.stock - sold) } : p
     );
 
-    // 2. Si vendió unidades, registrar venta comercial (comisión: la del lote, obligatoria)
+    // 2. Si vendió unidades, registrar venta comercial (comisión: la del producto, obligatoria)
     let updatedSales = sales;
     if (sold > 0) {
-      const lotCommission = settlingConsignment.commissionPerUnit;
+      const lotCommission = productCommission(settlingConsignment.productId, settlingConsignment.commissionPerUnit);
       if (lotCommission === null || lotCommission === undefined) {
-        alert("Este lote no tiene comisión por unidad definida. Definila en la columna \"Comisión c/u\" antes de rendir.");
+        alert(`"${settlingConsignment.productTitle}" no tiene comisión por unidad. Cargala en Flujo de stock (columna "Comisión c/u") antes de rendir.`);
         return;
       }
       const subtotal = sold * settlingConsignment.unitAgreedPrice;
@@ -2777,6 +2769,7 @@ export default function PecadosPage() {
           <CashFlowTab
             products={products}
             onUpdateProduct={handleUpdateProductPricing}
+            onSetCommission={handleSetProductCommission}
             onEditProduct={openEditProductModal}
             onOpenImport={openImportModal}
             importSuccessBanner={importSuccessBanner}
@@ -3934,21 +3927,15 @@ export default function PecadosPage() {
                               <td className="p-3.5 text-center font-bold text-emerald-400">{c.quantitySold} un.</td>
                               <td className="p-3.5 text-center font-bold text-amber-400">{pending} un.</td>
                               <td className="p-3.5 font-mono">${c.unitAgreedPrice.toLocaleString("es-AR")}</td>
-                              <td className="p-3.5">
-                                <button
-                                  type="button"
-                                  onClick={() => handleSetLotCommission(c)}
-                                  className={`font-mono text-[11px] px-2 py-0.5 rounded border cursor-pointer ${
-                                    c.commissionPerUnit === null || c.commissionPerUnit === undefined
-                                      ? "bg-amber-950 text-amber-300 border-amber-700 font-bold"
-                                      : "bg-zinc-950 text-zinc-200 border-zinc-700 hover:border-zinc-500"
-                                  }`}
-                                  title="Definir o cambiar la comisión por unidad de este lote"
-                                >
-                                  {c.commissionPerUnit === null || c.commissionPerUnit === undefined
-                                    ? "Definir"
-                                    : formatMoney(c.commissionPerUnit)}
-                                </button>
+                              <td className="p-3.5" title="Comisión del producto (se define en Flujo de stock)">
+                                {(() => {
+                                  const cpu = productCommission(c.productId, c.commissionPerUnit);
+                                  return cpu === null ? (
+                                    <span className="font-mono text-[11px] text-amber-300 font-bold">A definir en Flujo de stock</span>
+                                  ) : (
+                                    <span className="font-mono text-[11px] text-zinc-200">{formatMoney(cpu)}</span>
+                                  );
+                                })()}
                               </td>
                               <td className="p-3.5">
                                 {c.status === "settled" || pending <= 0 ? (
@@ -6140,7 +6127,8 @@ export default function PecadosPage() {
                           ...consignmentForm,
                           items: consignmentForm.items.map((it, i) => (i === idx ? { ...it, ...patch } : it)),
                         });
-                      const missingCommission = row.commissionPerUnit.trim() === "";
+                      const cpu = sel ? productCommission(sel.id) : null;
+                      const free = sel ? sel.stock - unitsWithResellers(sel.id) : 0;
                       return (
                         <div key={idx} className="p-2.5 rounded-xl bg-zinc-950 border border-zinc-800 space-y-2">
                           <div className="flex items-end gap-2">
@@ -6154,11 +6142,14 @@ export default function PecadosPage() {
                                 }}
                                 className="w-full min-w-0 bg-zinc-900 border border-zinc-800 px-2 py-1.5 rounded-lg text-white text-xs"
                               >
-                                {products.map((p) => (
-                                  <option key={p.id} value={p.id} disabled={p.stock <= 0}>
-                                    {p.title} ({p.stock} en depósito)
-                                  </option>
-                                ))}
+                                {products.map((p) => {
+                                  const freeP = p.stock - unitsWithResellers(p.id);
+                                  return (
+                                    <option key={p.id} value={p.id} disabled={freeP <= 0}>
+                                      {p.title} ({Math.max(0, freeP)} disponibles)
+                                    </option>
+                                  );
+                                })}
                               </select>
                             </div>
                             <button
@@ -6176,7 +6167,7 @@ export default function PecadosPage() {
                               <input
                                 type="number"
                                 min={1}
-                                max={sel?.stock || 1}
+                                max={Math.max(1, free)}
                                 required
                                 value={row.quantity}
                                 onChange={(e) => update({ quantity: Math.max(1, Number(e.target.value) || 1) })}
@@ -6196,21 +6187,15 @@ export default function PecadosPage() {
                               />
                             </div>
                             <div>
-                              <label className={`text-[10px] block mb-0.5 font-bold ${missingCommission ? "text-amber-300" : "text-zinc-500"}`}>
-                                Comisión c/u *
-                              </label>
-                              <input
-                                type="number"
-                                min={0}
-                                step="0.01"
-                                required
-                                value={row.commissionPerUnit}
-                                onChange={(e) => update({ commissionPerUnit: e.target.value })}
-                                placeholder="$"
-                                className={`w-full px-2 py-1.5 rounded-lg bg-zinc-900 border text-white font-mono ${
-                                  missingCommission ? "border-amber-600" : "border-zinc-800"
+                              <span className="text-[10px] text-zinc-500 block mb-0.5">Comisión c/u</span>
+                              <div
+                                className={`px-2 py-1.5 rounded-lg bg-zinc-900/60 border font-mono truncate ${
+                                  cpu === null ? "border-amber-700 text-amber-300" : "border-zinc-800 text-zinc-200"
                                 }`}
-                              />
+                                title="Se define por producto en Flujo de stock"
+                              >
+                                {cpu === null ? "A definir" : formatMoney(cpu)}
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -6218,7 +6203,8 @@ export default function PecadosPage() {
                     })}
                   </div>
                   <p className="mt-1.5 text-[10px] text-zinc-500">
-                    La comisión es un monto fijo por cada unidad que venda la revendedora (de este lote o con su código).
+                    La comisión es por producto (la misma para todas las revendedoras) y se carga en Flujo de stock. Entregar mercadería no baja el
+                    stock: baja recién cuando se vende.
                   </p>
                 </div>
 
@@ -6357,7 +6343,7 @@ export default function PecadosPage() {
                     {(() => {
                       const res = resellers.find((r) => r.id === settlingConsignment.resellerId);
                       const gross = settleForm.quantitySold * settlingConsignment.unitAgreedPrice;
-                      const cpu = settlingConsignment.commissionPerUnit;
+                      const cpu = productCommission(settlingConsignment.productId, settlingConsignment.commissionPerUnit);
                       const comm = (cpu ?? 0) * settleForm.quantitySold;
                       const net = gross - comm;
                       return (
