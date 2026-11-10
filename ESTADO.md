@@ -4,7 +4,7 @@
 > ⚠️ Repo público: sin contraseñas, tokens ni datos personales.
 
 **Última actualización:** 2026-11-10
-**Versión en producción:** commit `78f78f3` (descuento por pago en efectivo en la mercadería en mano de la revendedora). En producción coincide con GitHub (`master`).
+**Versión en producción:** commit `cb734bc` (tienda rápida en iPhone: sin filtros blur y animaciones del aviso +18 en CSS). En producción coincide con GitHub (`master`).
 
 ## Funciona en producción
 
@@ -69,6 +69,8 @@
   - Estados de pruebas: `pecados_ESTADO_PRUEBAS_*`.
 
 ## Pendientes y avisos
+
+- [ ] **Confirmar en un iPhone real** que la tienda ya abre rápido (arreglo del 10/11; se midió con WebKit emulado).
 
 - [ ] **Datos posteriores al punto de restauración:** el punto vigente es del 27/10. Después se importó "Marzin.xlsb" (4 productos nuevos y la compra), se repararon nombres, se entregaron lotes y se migró el stock de revendedoras. Hoy hay 59 productos activos y 87 unidades. Si se restaura, eso se pierde: conviene crear un punto nuevo.
 - [ ] **CON IVA de la planilla:** en algunos artículos el CON IVA de "Marzin.xlsb" no es exactamente SIN IVA × 1,21 (ej. FR510: $6.699,87 contra $6.582,40). En la compra se registra el de la planilla; en Flujo de stock se calcula con el 21%.

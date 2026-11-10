@@ -4,6 +4,10 @@
 > Formato: fecha · commit · qué cambió (para el dueño de la tienda, sin tecnicismos de más).
 
 ## 2026-11-10
+- `b5314eb`, `cb734bc` **Tienda en iPhone:** en Safari (iPhone) la tienda tardaba más de 3 minutos en mostrarse y el botón "Entrar" del aviso +18 casi no respondía. En Android y PC andaba bien.
+  - **Causa:** efectos visuales que Safari dibuja muy lento. Eran filtros de desenfoque (blur) grandes en el fondo, en las barras fijas y en las etiquetas de cada producto, y animaciones infinitas del aviso +18 hechas cuadro por cuadro.
+  - **Arreglo:** el resplandor de fondo ahora son degradados que se ven igual. Se sacaron los desenfoques de las barras, las etiquetas y las fotos. Las animaciones del aviso pasaron a CSS (solo movimiento y transparencia), que el iPhone resuelve con la placa de video.
+  - **Medido** en un navegador WebKit (el motor de Safari) emulando un iPhone: antes "Entrar" no respondía en 2 minutos; ahora el catálogo aparece en segundos y se mueve fluido.
 - `78f78f3` **Asociado: descuento por pago en efectivo en la mercadería en mano.** Antes, lo que la revendedora vendía de su lote se cobraba siempre al mismo precio, sin importar el medio de pago, y no se veía el descuento. Ahora sigue la misma regla que el depósito: efectivo, transferencia y Mercado Pago pagan el precio del lote (FT) y muestran el descuento; tarjeta y "otro" pagan el TC (precio del lote × 1,10). Las ventas ya registradas no cambian.
 
 ## 2026-11-09

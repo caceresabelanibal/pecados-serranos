@@ -147,4 +147,5 @@ Los accesos no tienen botones en la tienda: se entra escribiendo la URL.
 - **Backups manuales** (`/root/backups-manuales`):
   - Comprimidos (gzip), con permisos 600.
   - Cuando el dueño dice **"restaurá"**, se vuelve al punto de restauración vigente (ver `ESTADO.md`).
+- **Diseño compatible con iPhone:** no usar filtros `blur`/`backdrop-blur`/`drop-shadow` en elementos grandes, fijos o repetidos (tarjetas de productos), ni animaciones infinitas con framer-motion. Para resplandores, usar degradados radiales. Para animaciones en bucle, usar CSS con `transform`/`opacity` (clases `ag-*` en `app/globals.css`). Safari en iPhone se congelaba con eso.
 - **Después de cada cambio** se actualizan `ESTADO.md` y `CHANGELOG.md` (y este archivo si cambia algo de fondo).
