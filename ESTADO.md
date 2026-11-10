@@ -4,8 +4,7 @@
 > ⚠️ Repo público: sin contraseñas, tokens ni datos personales.
 
 **Última actualización:** 2026-11-10
-**Versión en producción:** commit `ff77d43` (stock de revendedoras al vender y comisión por producto).
-**Pendiente de deploy:** `78f78f3` (descuento por pago en efectivo en la mercadería en mano de la revendedora) ya está en GitHub (`master`) y falta correr `scripts/deploy.sh` en el servidor.
+**Versión en producción:** commit `78f78f3` (descuento por pago en efectivo en la mercadería en mano de la revendedora). En producción coincide con GitHub (`master`).
 
 ## Funciona en producción
 
