@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { BarChart3, Ban, Edit3, Loader2, LogOut, Package, Plus, Receipt, Trash2, UserCheck, X } from "lucide-react";
 import { PAYMENT_METHOD_LABELS, PAYMENT_METHOD_OPTIONS, commissionStatus, isCashPriceMethod, owedToStore, type PaymentMethod, type Sale } from "@/app/products";
-import { formatMoney } from "@/lib/pricing";
+import { formatMoney, precioPublicoTC as precioTC } from "@/lib/pricing";
 import { commissionTotals } from "@/app/components/ResellerSections";
 
 interface AsociadoProduct {
@@ -172,8 +172,9 @@ export default function AsociadoPanel({ onLogout }: Props) {
           key: `c:${c.id}`,
           label: `${c.productTitle} — ${available} en mano`,
           available,
-          unit: () => c.unitAgreedPrice,
-          list: c.unitAgreedPrice,
+          // Precio del lote = efectivo (FT); tarjeta y otros pagan el TC
+          unit: (m: PaymentMethod) => (isCashPriceMethod(m) ? c.unitAgreedPrice : precioTC(c.unitAgreedPrice)),
+          list: precioTC(c.unitAgreedPrice),
           commission: c.commissionPerUnit,
         })),
     [data, editQty]
@@ -748,7 +749,7 @@ export default function AsociadoPanel({ onLogout }: Props) {
                     ))}
                   </select>
                   <span className="mt-1 block text-[10px] text-zinc-500">
-                    Tu mercadería se vende al precio acordado. Del depósito: efectivo/transferencia/Mercado Pago a precio en efectivo, tarjeta a precio de la tienda.
+                    Efectivo, transferencia y Mercado Pago: precio en efectivo (con descuento). Tarjeta: precio de la tienda.
                   </span>
                 </div>
 

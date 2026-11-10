@@ -96,6 +96,7 @@ Los accesos no tienen botones en la tienda: se entra escribiendo la URL.
   - El stock baja **recién cuando se vende**: la tienda vende, la revendedora registra la venta de su lote, o el admin rinde el lote.
   - Lo devuelto no cambia el stock. Anular una venta devuelve el stock y, si salió de un lote, también la unidad "en mano".
   - Para entregar, el disponible es el stock menos lo que ya está en manos de revendedoras.
+  - El precio del lote es el de **efectivo (FT)**. Cuando la revendedora vende de su lote con tarjeta (u "otro"), se cobra el TC = precio del lote × 1,10, igual que en la tienda. En efectivo, transferencia o Mercado Pago se ve el descuento por pago en efectivo.
 - **Comisión:** monto fijo por unidad, definido **por producto** en Flujo de stock (columna "Comisión c/u").
   - Es la misma para todas las revendedoras y para cualquier forma de venta: lote, depósito o compra con su código.
   - Si el producto no tiene comisión, la venta queda "a definir". Al cargarla en el producto, se completan solas todas las ventas pendientes de ese producto.

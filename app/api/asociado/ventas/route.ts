@@ -84,6 +84,8 @@ async function buildSale(tx: Prisma.TransactionClient, reseller: Reseller, input
       await tx.$executeRaw`UPDATE "PecadoProduct" SET stock = GREATEST(0, stock - ${qty}) WHERE id = ${c.productId}`;
       // Comisión: la del producto (Flujo de stock); si no tiene, la que se había puesto en el lote
       const productCommission = await commissionUnitFor(tx, reseller.id, c.productId);
+      // El precio del lote es el de efectivo (FT); tarjeta y otros pagan el TC, como en la tienda
+      const lotPrice = isCashPriceMethod(input.paymentMethod) ? c.unitAgreedPrice : precioPublicoTC(c.unitAgreedPrice);
       items.push(
         withCommission(
           {
@@ -91,8 +93,8 @@ async function buildSale(tx: Prisma.TransactionClient, reseller: Reseller, input
             productSku: c.productSku,
             productTitle: c.productTitle,
             quantity: qty,
-            unitPrice: c.unitAgreedPrice,
-            subtotal: Math.round(c.unitAgreedPrice * qty * 100) / 100,
+            unitPrice: lotPrice,
+            subtotal: Math.round(lotPrice * qty * 100) / 100,
             consignmentId: c.id,
           },
           productCommission ?? c.commissionPerUnit

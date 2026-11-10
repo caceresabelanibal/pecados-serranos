@@ -3,6 +3,9 @@
 > Historial de cambios, el más nuevo arriba. Se agrega una entrada con cada cambio publicado.
 > Formato: fecha · commit · qué cambió (para el dueño de la tienda, sin tecnicismos de más).
 
+## 2026-11-10
+- **Asociado: descuento por pago en efectivo en la mercadería en mano.** Antes, lo que la revendedora vendía de su lote se cobraba siempre al mismo precio, sin importar el medio de pago, y no se veía el descuento. Ahora sigue la misma regla que el depósito: efectivo, transferencia y Mercado Pago pagan el precio del lote (FT) y muestran el descuento; tarjeta y "otro" pagan el TC (precio del lote × 1,10). Las ventas ya registradas no cambian.
+
 ## 2026-11-09
 - `caa00aa`, `ff77d43` **Revendedoras: stock y comisiones.**
   - **Entregar mercadería a una revendedora ya no baja el stock.** Baja recién cuando se vende: venta de la tienda, venta registrada por la revendedora o rendición del lote. Así la tienda online ya no muestra "sin stock" un artículo que solo está prestado.
