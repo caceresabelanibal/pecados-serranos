@@ -59,33 +59,27 @@ export default function AgeGate() {
           aria-labelledby="age-gate-title"
           aria-describedby="age-gate-desc"
         >
-          {/* Fondo: manchas de luz que se mueven suave. Son degradados radiales (no filtros blur):
-              en Safari/iPhone los blur animados dejan la página casi congelada. */}
+          {/* Fondo: manchas de luz que se mueven suave. Son degradados radiales con animaciones CSS
+              (sólo transform/opacity, clases ag-* en globals.css): en Safari/iPhone los filtros blur y
+              los bucles de framer-motion dejaban la página casi congelada. */}
           <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
-            <motion.div
-              className="absolute -top-48 -left-40 w-[40rem] h-[40rem] rounded-full bg-[radial-gradient(closest-side,rgba(185,28,28,0.3),transparent)] will-change-transform"
-              animate={reduce ? undefined : { x: [0, 60, 0], y: [0, 40, 0], scale: [1, 1.15, 1] }}
-              transition={{ duration: 14, repeat: Infinity, ease: "easeInOut" }}
-            />
-            <motion.div
-              className="absolute -bottom-56 -right-40 w-[44rem] h-[44rem] rounded-full bg-[radial-gradient(closest-side,rgba(225,29,72,0.25),transparent)] will-change-transform"
-              animate={reduce ? undefined : { x: [0, -50, 0], y: [0, -30, 0], scale: [1.1, 1, 1.1] }}
-              transition={{ duration: 16, repeat: Infinity, ease: "easeInOut" }}
-            />
-            <motion.div
-              className="absolute top-1/4 left-1/2 w-[34rem] h-[34rem] -translate-x-1/2 rounded-full bg-[radial-gradient(closest-side,rgba(245,158,11,0.1),transparent)] will-change-[opacity]"
-              animate={reduce ? undefined : { opacity: [0.4, 0.8, 0.4] }}
-              transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
-            />
+            <div className="ag-drift-a absolute -top-48 -left-40 w-[40rem] h-[40rem] rounded-full bg-[radial-gradient(closest-side,rgba(185,28,28,0.3),transparent)]" />
+            <div className="ag-drift-b absolute -bottom-56 -right-40 w-[44rem] h-[44rem] rounded-full bg-[radial-gradient(closest-side,rgba(225,29,72,0.25),transparent)]" />
+            <div className="absolute top-1/4 left-1/2 w-[34rem] h-[34rem] -translate-x-1/2">
+              <div className="ag-glow w-full h-full rounded-full bg-[radial-gradient(closest-side,rgba(245,158,11,0.1),transparent)]" />
+            </div>
             {/* Brillos flotantes */}
             {!reduce &&
               Array.from({ length: 14 }).map((_, i) => (
-                <motion.span
+                <span
                   key={i}
-                  className="absolute w-1 h-1 rounded-full bg-red-300/60"
-                  style={{ left: `${(i * 37) % 100}%`, top: `${(i * 53) % 100}%` }}
-                  animate={{ y: [0, -30, 0], opacity: [0, 0.9, 0] }}
-                  transition={{ duration: 5 + (i % 5), repeat: Infinity, delay: i * 0.4, ease: "easeInOut" }}
+                  className="ag-spark absolute w-1 h-1 rounded-full bg-red-300/60"
+                  style={{
+                    left: `${(i * 37) % 100}%`,
+                    top: `${(i * 53) % 100}%`,
+                    animationDuration: `${5 + (i % 5)}s`,
+                    animationDelay: `${i * 0.4}s`,
+                  }}
                 />
               ))}
           </div>
@@ -99,26 +93,17 @@ export default function AgeGate() {
             >
               {/* Marco con degradé que gira (recortado al borde redondeado) */}
               <div className="relative rounded-[28px] p-[2px] overflow-hidden shadow-2xl shadow-red-950/60">
-              <motion.div
-                aria-hidden="true"
-                className="absolute left-1/2 top-1/2 w-[200%] aspect-square -translate-x-1/2 -translate-y-1/2 bg-[conic-gradient(from_0deg,#dc2626,#f43f5e,#f59e0b,#7f1d1d,#dc2626)] will-change-transform"
-                animate={reduce ? undefined : { rotate: 360 }}
-                transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-              />
+              <div aria-hidden="true" className="absolute left-1/2 top-1/2 w-[200%] aspect-square -translate-x-1/2 -translate-y-1/2">
+                <div className="ag-spin w-full h-full bg-[conic-gradient(from_0deg,#dc2626,#f43f5e,#f59e0b,#7f1d1d,#dc2626)]" />
+              </div>
               <div className="relative rounded-[26px] bg-zinc-950 px-5 py-4 sm:px-9 sm:py-9 lg:px-12 lg:py-10 text-center overflow-hidden lg:grid lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-12 lg:items-center">
                 {/* Columna izquierda en escritorio: logo, +18 y título */}
                 <div className="lg:flex lg:flex-col lg:items-center">
                 {/* Logo flotando con halo */}
-                <motion.div
-                  className="relative mx-auto w-32 h-20 sm:w-56 sm:h-40 lg:w-64 lg:h-44"
-                  animate={reduce ? undefined : { y: [0, -8, 0] }}
-                  transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-                >
-                  <motion.div
+                <div className="ag-float relative mx-auto w-32 h-20 sm:w-56 sm:h-40 lg:w-64 lg:h-44">
+                  <div
                     aria-hidden="true"
-                    className="absolute -inset-4 rounded-full bg-[radial-gradient(closest-side,rgba(220,38,38,0.45),transparent)] will-change-transform"
-                    animate={reduce ? undefined : { scale: [0.9, 1.1, 0.9], opacity: [0.5, 0.9, 0.5] }}
-                    transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut" }}
+                    className="ag-pulse absolute -inset-4 rounded-full bg-[radial-gradient(closest-side,rgba(220,38,38,0.45),transparent)]"
                   />
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -126,7 +111,7 @@ export default function AgeGate() {
                     alt="Pecados Serranos"
                     className="relative w-full h-full object-contain"
                   />
-                </motion.div>
+                </div>
 
                 {/* Sello +18 */}
                 <motion.div
@@ -185,10 +170,13 @@ export default function AgeGate() {
                     onClick={enter}
                     whileHover={reduce ? undefined : { scale: 1.03 }}
                     whileTap={{ scale: 0.97 }}
-                    className="relative w-full py-3 sm:py-3.5 rounded-2xl bg-gradient-to-r from-red-600 via-rose-600 to-red-600 bg-[length:200%_100%] text-white font-bold text-sm shadow-lg shadow-red-900/50 overflow-hidden cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
-                    animate={reduce ? undefined : { backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"] }}
-                    transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
+                    className="relative w-full py-3 sm:py-3.5 rounded-2xl bg-gradient-to-r from-red-600 via-rose-600 to-red-600 text-white font-bold text-sm shadow-lg shadow-red-900/50 overflow-hidden cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
                   >
+                    {/* Brillo que recorre el botón (sólo transform, liviano en el celular) */}
+                    <span
+                      aria-hidden="true"
+                      className="ag-sheen absolute inset-y-0 -left-1/2 w-1/2 bg-gradient-to-r from-transparent via-white/15 to-transparent"
+                    />
                     <span className="relative inline-flex items-center gap-2">
                       <ShieldCheck className="w-4 h-4" /> Tengo 18 años o más — Entrar
                     </span>
