@@ -59,20 +59,21 @@ export default function AgeGate() {
           aria-labelledby="age-gate-title"
           aria-describedby="age-gate-desc"
         >
-          {/* Fondo: manchas de luz que se mueven suave */}
+          {/* Fondo: manchas de luz que se mueven suave. Son degradados radiales (no filtros blur):
+              en Safari/iPhone los blur animados dejan la página casi congelada. */}
           <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
             <motion.div
-              className="absolute -top-32 -left-24 w-[28rem] h-[28rem] rounded-full bg-red-700/30 blur-3xl"
+              className="absolute -top-48 -left-40 w-[40rem] h-[40rem] rounded-full bg-[radial-gradient(closest-side,rgba(185,28,28,0.3),transparent)] will-change-transform"
               animate={reduce ? undefined : { x: [0, 60, 0], y: [0, 40, 0], scale: [1, 1.15, 1] }}
               transition={{ duration: 14, repeat: Infinity, ease: "easeInOut" }}
             />
             <motion.div
-              className="absolute -bottom-40 -right-24 w-[32rem] h-[32rem] rounded-full bg-rose-600/25 blur-3xl"
+              className="absolute -bottom-56 -right-40 w-[44rem] h-[44rem] rounded-full bg-[radial-gradient(closest-side,rgba(225,29,72,0.25),transparent)] will-change-transform"
               animate={reduce ? undefined : { x: [0, -50, 0], y: [0, -30, 0], scale: [1.1, 1, 1.1] }}
               transition={{ duration: 16, repeat: Infinity, ease: "easeInOut" }}
             />
             <motion.div
-              className="absolute top-1/3 left-1/2 w-[22rem] h-[22rem] -translate-x-1/2 rounded-full bg-amber-500/10 blur-3xl"
+              className="absolute top-1/4 left-1/2 w-[34rem] h-[34rem] -translate-x-1/2 rounded-full bg-[radial-gradient(closest-side,rgba(245,158,11,0.1),transparent)] will-change-[opacity]"
               animate={reduce ? undefined : { opacity: [0.4, 0.8, 0.4] }}
               transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
             />
@@ -100,7 +101,7 @@ export default function AgeGate() {
               <div className="relative rounded-[28px] p-[2px] overflow-hidden shadow-2xl shadow-red-950/60">
               <motion.div
                 aria-hidden="true"
-                className="absolute left-1/2 top-1/2 w-[200%] aspect-square -translate-x-1/2 -translate-y-1/2 bg-[conic-gradient(from_0deg,#dc2626,#f43f5e,#f59e0b,#7f1d1d,#dc2626)]"
+                className="absolute left-1/2 top-1/2 w-[200%] aspect-square -translate-x-1/2 -translate-y-1/2 bg-[conic-gradient(from_0deg,#dc2626,#f43f5e,#f59e0b,#7f1d1d,#dc2626)] will-change-transform"
                 animate={reduce ? undefined : { rotate: 360 }}
                 transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
               />
@@ -115,7 +116,7 @@ export default function AgeGate() {
                 >
                   <motion.div
                     aria-hidden="true"
-                    className="absolute inset-4 rounded-full bg-red-600/40 blur-2xl"
+                    className="absolute -inset-4 rounded-full bg-[radial-gradient(closest-side,rgba(220,38,38,0.45),transparent)] will-change-transform"
                     animate={reduce ? undefined : { scale: [0.9, 1.1, 0.9], opacity: [0.5, 0.9, 0.5] }}
                     transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut" }}
                   />
@@ -123,7 +124,7 @@ export default function AgeGate() {
                   <img
                     src="/pecados/logo-transparent.png"
                     alt="Pecados Serranos"
-                    className="relative w-full h-full object-contain drop-shadow-[0_10px_25px_rgba(220,38,38,0.45)]"
+                    className="relative w-full h-full object-contain"
                   />
                 </motion.div>
 

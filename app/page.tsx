@@ -2513,16 +2513,21 @@ export default function PecadosPage() {
     <div className="min-h-screen bg-[#0a0506] text-zinc-100 flex flex-col font-sans selection:bg-red-600 selection:text-white">
       {/* Aviso de sitio para adultos (en cada visita nueva a la tienda) */}
       {!isAdmin && !entry && <AgeGate />}
-      {/* Background ambient fiery glow */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[700px] h-[450px] bg-red-600/15 rounded-full blur-[140px]" />
-        <div className="absolute top-1/3 -right-40 w-[500px] h-[500px] bg-rose-700/10 rounded-full blur-[160px]" />
-        <div className="absolute bottom-10 -left-40 w-[600px] h-[500px] bg-red-900/15 rounded-full blur-[150px]" />
-      </div>
+      {/* Resplandor de fondo: degradados radiales en vez de filtros blur (en Safari/iPhone los blur
+          grandes hacen que la página tarde minutos en mostrarse) */}
+      <div
+        className="fixed inset-0 pointer-events-none z-0"
+        style={{
+          background:
+            "radial-gradient(ellipse 700px 450px at 50% -60px, rgba(220,38,38,0.13), transparent 70%)," +
+            "radial-gradient(ellipse 500px 500px at calc(100% + 60px) 45%, rgba(190,18,60,0.09), transparent 70%)," +
+            "radial-gradient(ellipse 600px 500px at -60px calc(100% - 200px), rgba(127,29,29,0.14), transparent 70%)",
+        }}
+      />
 
       {/* Admin Top Sticky Bar & Navigation */}
       {isAdmin && (
-        <div className="bg-red-950/95 border-b border-red-800/60 sticky top-0 z-50 backdrop-blur-md text-xs shadow-xl">
+        <div className="bg-red-950/95 border-b border-red-800/60 sticky top-0 z-50 text-xs shadow-xl">
           <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
               {/* Brand & KV status */}
@@ -2715,7 +2720,7 @@ export default function PecadosPage() {
 
       {/* Main Store Header (en modo admin no se muestra: la barra del panel ya tiene "Salir") */}
       {!isAdmin && (
-      <header className="relative z-40 w-full border-b border-red-950/40 bg-black/75 backdrop-blur-md sticky top-0">
+      <header className="relative z-40 w-full border-b border-red-950/40 bg-black/90 sticky top-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-end gap-4">
           <div className="flex items-center gap-2.5 sm:gap-3">
             {/* Admin toggle button & Cart Trigger */}
@@ -4147,7 +4152,7 @@ export default function PecadosPage() {
                             fill
                             sizes="(max-width: 640px) 45vw, (max-width: 1024px) 30vw, 220px"
                             unoptimized={true}
-                            className="object-contain p-1 group-hover:scale-105 transition-transform duration-300 drop-shadow-md select-none"
+                            className="object-contain p-1 group-hover:scale-105 transition-transform duration-300 select-none"
                           />
                           {!isAdmin && (
                             <span className="absolute bottom-1.5 right-1.5 p-1.5 rounded-full bg-black/70 text-white border border-zinc-700 shadow-md">
@@ -4159,7 +4164,7 @@ export default function PecadosPage() {
                         {/* SKU Badge & Stock Badges */}
                         <div className="absolute top-2 left-2 flex flex-col gap-1 z-10">
                           {product.sku && (
-                            <span className="px-1.5 py-0.5 rounded bg-black/85 text-red-400 border border-red-900/70 font-mono text-[9px] font-bold tracking-tight backdrop-blur-xs shadow-xs">
+                            <span className="px-1.5 py-0.5 rounded bg-black/85 text-red-400 border border-red-900/70 font-mono text-[9px] font-bold tracking-tight shadow-xs">
                               #{product.sku}
                             </span>
                           )}
@@ -4180,7 +4185,7 @@ export default function PecadosPage() {
                         </div>
 
                         {/* Category tag */}
-                        <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-black/80 text-zinc-300 border border-zinc-800 text-[9px] font-medium backdrop-blur-xs shadow-xs max-w-[85px] sm:max-w-[110px] truncate z-10">
+                        <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-black/80 text-zinc-300 border border-zinc-800 text-[9px] font-medium shadow-xs max-w-[85px] sm:max-w-[110px] truncate z-10">
                           {product.category}
                         </span>
 
