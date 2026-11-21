@@ -3,8 +3,8 @@
 > Foto del sistema **hoy**. Se actualiza después de cada cambio.
 > ⚠️ Repo público: sin contraseñas, tokens ni datos personales.
 
-**Última actualización:** 2026-11-10
-**Versión en producción:** commit `cb734bc` (tienda rápida en iPhone: sin filtros blur y animaciones del aviso +18 en CSS). En producción coincide con GitHub (`master`).
+**Última actualización:** 2026-11-21
+**Versión en producción:** commit `0a6bc79` (asociado en el celular: cantidad con desplegable de unidades disponibles). En producción coincide con GitHub (`master`).
 
 ## Funciona en producción
 
@@ -38,7 +38,7 @@
 - **Asociado (`/asociado`):**
   - Mis ventas: filtros por período, "Pago a tienda", editar/anular y "Mis comisiones".
   - Mi mercadería: lo que tiene en mano y cuánto le paga a la tienda por unidad.
-  - Registrar venta.
+  - Registrar venta (efectivo/transferencia/Mercado Pago con descuento; en el celular, la cantidad se elige de un desplegable con las unidades disponibles).
 - **Mercado Pago:** Checkout Pro configurado con la cuenta del dueño. Los avisos (webhook) se configuran solos en cada pago.
 
 ## Datos en producción (al crear el punto de restauración, 2026-10-27 00:10)

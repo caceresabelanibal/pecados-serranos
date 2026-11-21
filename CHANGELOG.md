@@ -3,6 +3,9 @@
 > Historial de cambios, el más nuevo arriba. Se agrega una entrada con cada cambio publicado.
 > Formato: fecha · commit · qué cambió (para el dueño de la tienda, sin tecnicismos de más).
 
+## 2026-11-21
+- `0a6bc79` **Asociado en el celular: cantidad con desplegable.** Al registrar una venta, si el artículo tiene 2 o más unidades disponibles (en mano o en el depósito), la cantidad se elige de un menú desplegable con las opciones 1, 2, 3… hasta el total disponible. Si tiene una sola, queda fija en 1. En la computadora sigue el campo numérico de siempre.
+
 ## 2026-11-10
 - `b5314eb`, `cb734bc` **Tienda en iPhone:** en Safari (iPhone) la tienda tardaba más de 3 minutos en mostrarse y el botón "Entrar" del aviso +18 casi no respondía. En Android y PC andaba bien.
   - **Causa:** efectos visuales que Safari dibuja muy lento. Eran filtros de desenfoque (blur) grandes en el fondo, en las barras fijas y en las etiquetas de cada producto, y animaciones infinitas del aviso +18 hechas cuadro por cuadro.
