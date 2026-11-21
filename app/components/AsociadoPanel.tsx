@@ -816,8 +816,25 @@ export default function AsociadoPanel({ onLogout }: Props) {
                               max={max}
                               value={item.quantity}
                               onChange={(e) => update({ quantity: Math.min(Math.max(1, Number(e.target.value) || 1), max) })}
-                              className="w-full px-2 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-white font-mono text-center"
+                              className="hidden sm:block w-full px-2 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-white font-mono text-center"
                             />
+                            {/* En el celular: desplegable con las unidades disponibles (si hay más de una) */}
+                            {max > 1 ? (
+                              <select
+                                value={Math.min(item.quantity, max)}
+                                onChange={(e) => update({ quantity: Number(e.target.value) })}
+                                className="sm:hidden w-full px-1 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-white font-mono text-center"
+                                aria-label="Cantidad"
+                              >
+                                {Array.from({ length: max }, (_, n) => n + 1).map((n) => (
+                                  <option key={n} value={n}>
+                                    {n}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <div className="sm:hidden px-2 py-1.5 rounded-lg bg-zinc-900/60 border border-zinc-800 text-white font-mono text-center">1</div>
+                            )}
                           </div>
                           <button
                             type="button"
